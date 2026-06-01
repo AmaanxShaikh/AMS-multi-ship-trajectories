@@ -3,14 +3,9 @@
 Front-end (UI only) for the **AMS P5** multi-ship + radar trajectory simulator
 (University of Magdeburg, AMS group, SoSe 2025/26).
 
-Per the supervisor's kickoff: **build the front-end first**. Physics integration
-comes later, guided in the lab.
-
 This app collects scenario inputs from the user — region, ships, waypoints,
 ship parameters — and exports them as a scenario JSON. No simulation runs
-here. The look and structure mirror the previous student team's
-`streamlit_app.py` (sidebar controls + two-column main area with a Folium map),
-extended to support multiple ships per scenario.
+here; the physics backend is a later milestone.
 
 ## What it does
 
@@ -30,17 +25,10 @@ extended to support multiple ships per scenario.
   coordinates.
 - **Save Scenario** downloads the configuration as JSON.
 
-## What it does NOT do (by design)
-
-- No physics, no trajectories, no simulation output. That's a later milestone.
-- No collision logic — the supervisor confirmed incoming/outgoing lanes are
-  already separated in the existing polygon data, so collisions don't need
-  handling.
-
 ## How to run
 
 ```powershell
-cd C:\Users\shaik\OneDrive\Desktop\maritime-scenario-builder
+cd C:\Users\shaik\Desktop\maritime-scenario-builder
 .\.venv\Scripts\Activate.ps1
 streamlit run app.py
 ```
@@ -55,7 +43,7 @@ maritime-scenario-builder/
 ├── core/
 │   ├── scenario.py         Ship / Waypoint / Scenario dataclasses + JSON export
 │   └── regions.py          Loads LOS + bounding-box JSON per region
-├── data/                   Region geometry copied from the previous team
+├── data/                   Region geometry
 │   ├── rheinhafen_los.json
 │   ├── rheinhafen_bbox.json
 │   ├── cuxhaven_los.json
@@ -100,12 +88,5 @@ per-ship trajectories.
 |-------|-------------|
 | 1 | UI MVP (this) — collect multi-ship scenario inputs |
 | 2 | Wire in the previous team's MMG model as the backend |
-| 3 | Add a Plotly animated trajectory view (à la previous team) |
+| 3 | Plotly animated trajectory view |
 | 4 | Radar rotation simulation per ship |
-| 5 | Evaluation panel (cross-track error vs. AIS) |
-
-## References
-
-- Previous team's report: `../AMS/AMS__Simulation_and_Prediction_of_Ship_Trajectories.pdf`
-- Previous team's UI: `../AMS/streamlit_app.py` and `../AMS/StreamLit UI Ship Simulation/simulation_v2.py`
-- AIS datasets: `../AMS/AMS Data.zip` (Rheinhafen + Cuxhaven CSV/zip dumps, plus prior simulation outputs)
