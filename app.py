@@ -18,6 +18,7 @@ from core.regions import Region, available_regions, load_region
 from core.scenario import ENCOUNTER_TYPES, Scenario, Ship, Waypoint, next_color
 from core.scenario_builder import build_scenario
 from core.physics import scenario_with_physics, EnvParams
+from core.simulation_manager import SimulationManager
 
 st.set_page_config(layout="wide", page_title="Multi-Ship Trajectory Simulation")
 
@@ -32,6 +33,7 @@ def _init_state() -> None:
     st.session_state.setdefault("last_clicked", None)
     st.session_state.setdefault("trajectory_result", None)
     st.session_state.setdefault("radar_result", None)
+    st.session_state.setdefault("encounter_summary", None)
     st.session_state.setdefault("sim_running", False)
 
 _init_state()
@@ -274,6 +276,12 @@ with st.sidebar:
             radar_s      = (st.session_state["ships"][0]["radar_rotation_s"]
                             if st.session_state["ships"] else 6.0)
             result = embed_radar_in_scenario(result, radar_origin, radar_s)
+
+            with st.spinner("Running encounter analysis…"):
+                mgr = SimulationManager(result, dt=1.0)
+                for _ in mgr.run():
+                    pass
+                st.session_state["encounter_summary"] = mgr.summary()
 
             st.session_state["trajectory_result"] = result
             st.session_state["radar_result"]      = result
@@ -628,6 +636,48 @@ if st.session_state.get("radar_result"):
                 f"&nbsp;&nbsp;RCS: {rrs[0]['rcs_dbm2']} dBm²",
                 unsafe_allow_html=True)
             st.markdown("")
+    st.markdown("---")
+
+
+# ---------------------------------------------------------------------------
+# Section 5 — Encounter analysis (multi-ship simulation manager)
+# ---------------------------------------------------------------------------
+
+if st.session_state.get("encounter_summary"):
+    summary = st.session_state["encounter_summary"]
+    st.subheader("5. Encounter Analysis")
+
+    icon = {"head_on": "🚨", "crossing": "⚠️",
+            "overtaking": "↗️", "following": "➡️"}
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Duration",  f"{summary['duration_s']:.0f} s")
+    m2.metric("Ships",     summary["ship_count"])
+    m3.metric("Encounters", summary["events_total"])
+    by_type = summary["events_by_type"]
+    worst   = "head_on" if by_type.get("head_on") else (
+              "crossing" if by_type.get("crossing") else (
+              "overtaking" if by_type.get("overtaking") else "—"))
+    m4.metric("Worst type", f"{icon.get(worst,'')} {worst}")
+
+    if by_type:
+        st.markdown("**Breakdown:** " + " · ".join(
+            f"{icon.get(k,'')} {k} × {v}" for k, v in by_type.items()))
+
+    if summary["events"]:
+        st.markdown("**Event timeline**")
+        for ev in summary["events"][:25]:
+            ships = " ↔ ".join(ev["ships"])
+            st.markdown(
+                f"&nbsp;&nbsp;`t={ev['t']:>6.1f}s` "
+                f"{icon.get(ev['type'],'')} **{ev['type']}** — "
+                f"{ships} · {ev['distance_m']:.0f} m apart "
+                f"(Δhdg {ev['hdg_diff']:.0f}°)",
+                unsafe_allow_html=True)
+        if len(summary["events"]) > 25:
+            st.caption(f"… and {len(summary['events']) - 25} more events.")
+    else:
+        st.success("No close-quarters encounters detected.")
     st.markdown("---")
 
 
