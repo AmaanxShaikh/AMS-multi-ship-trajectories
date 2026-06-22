@@ -51,10 +51,12 @@ def _new_ship_dict(index: int) -> dict:
         "waypoints":           [],
         "radar_rotation_s":    6.0,
         "color":               next_color(index),
+        "start_time_s":        0.0,
     }
 
 
-def _ui_to_scenario(name: str, region_key: str, encounter_type: str) -> Scenario:
+def _ui_to_scenario(name: str, region_key: str, encounter_type: str,
+                    duration_s: float) -> Scenario:
     ships: List[Ship] = []
     for s in st.session_state["ships"]:
         ships.append(Ship(
@@ -66,9 +68,11 @@ def _ui_to_scenario(name: str, region_key: str, encounter_type: str) -> Scenario
             waypoints=[Waypoint(lat=lat, lon=lon) for (lat, lon) in s["waypoints"]],
             radar_rotation_s=float(s["radar_rotation_s"]),
             color=s["color"],
+            start_time_s=float(s.get("start_time_s", 0.0)),
         ))
     return Scenario(name=name, region=region_key,
-                    encounter_type=encounter_type, ships=ships)
+                    encounter_type=encounter_type,
+                    duration_s=float(duration_s), ships=ships)
 
 
 def _region_polygon(region: Region) -> Polygon | None:
@@ -133,6 +137,12 @@ with st.sidebar:
         "Scenario name",
         value=f"{region.display_name} — {encounter_labels[encounter_type]}",
     )
+    scenario_duration_s = st.number_input(
+        "Scenario duration (s)", 60.0, 36000.0, 3600.0, 60.0,
+        help="Total scenario length on the shared clock. The encounter "
+             "analysis stops at this time and ignores any ship whose start "
+             "time is beyond it.",
+    )
 
     if encounter_type != "custom":
         if st.button(
@@ -196,6 +206,14 @@ with st.sidebar:
             s["initial_speed_mps"]   = c4.number_input("Speed (m/s)",  0.0, 30.0,  float(s["initial_speed_mps"]),   0.1, key=f"sp_{active}")
             s["initial_heading_deg"] = c5.number_input("Heading (°)",   0.0, 360.0, float(s["initial_heading_deg"]), 1.0, key=f"hd_{active}")
             s["radar_rotation_s"]    = st.number_input("Radar period (s)", 1.0, 120.0, float(s["radar_rotation_s"]), 0.5, key=f"rad_{active}")
+            s["start_time_s"]        = st.number_input(
+                "Start time (s)", 0.0, 36000.0,
+                float(s.get("start_time_s", 0.0)), 10.0, key=f"start_{active}",
+                help="Seconds after t=0 when this ship enters the scene. "
+                     "Use this to stagger ships so paths that cross on the map "
+                     "are not flagged as encounters unless ships are actually "
+                     "present at the same time.",
+            )
             s["color"] = st.color_picker("Color", s["color"], key=f"col_{active}")
 
             cu, cc, cr = st.columns(3)
@@ -235,7 +253,8 @@ with st.sidebar:
     }.get(map_style_folium, "open-street-map")
 
     st.markdown("---")
-    scenario = _ui_to_scenario(scenario_name, location_style, encounter_type)
+    scenario = _ui_to_scenario(scenario_name, location_style, encounter_type,
+                               scenario_duration_s)
     st.download_button(
         "⬇ Save Scenario (JSON)", data=scenario.to_json(),
         file_name=f"{scenario_name.replace(' ','_').replace('—','-')}.json",
@@ -271,6 +290,13 @@ with st.sidebar:
                     dt            = 1.0,
                     use_live_wind = use_live_wind,
                 )
+                # Forward per-ship timing onto the physics output (the
+                # physics layer ignores it; the SimulationManager reads it).
+                start_map = {s["ship_id"]: s.get("start_time_s", 0.0)
+                             for s in scen_dict.get("ships", [])}
+                for s in result.get("ships", []):
+                    s["start_time_s"] = float(start_map.get(s["ship_id"], 0.0))
+                result["duration_s"] = float(scenario_duration_s)
 
             radar_origin = region.center
             radar_s      = (st.session_state["ships"][0]["radar_rotation_s"]
@@ -278,7 +304,10 @@ with st.sidebar:
             result = embed_radar_in_scenario(result, radar_origin, radar_s)
 
             with st.spinner("Running encounter analysis…"):
-                mgr = SimulationManager(result, dt=1.0)
+                mgr = SimulationManager(
+                    result, dt=1.0,
+                    max_duration_s=float(scenario_duration_s),
+                )
                 for _ in mgr.run():
                     pass
                 st.session_state["encounter_summary"] = mgr.summary()
@@ -663,6 +692,16 @@ if st.session_state.get("encounter_summary"):
     if by_type:
         st.markdown("**Breakdown:** " + " · ".join(
             f"{icon.get(k,'')} {k} × {v}" for k, v in by_type.items()))
+
+    windows = summary.get("ship_windows", [])
+    if windows:
+        st.markdown("**Ship presence on the shared clock**")
+        for w in windows:
+            st.markdown(
+                f"&nbsp;&nbsp;**{w['ship_id']}** — alive "
+                f"`t={w['start_time_s']:.0f}s → {w['end_time_s']:.0f}s`",
+                unsafe_allow_html=True,
+            )
 
     if summary["events"]:
         st.markdown("**Event timeline**")

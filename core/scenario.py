@@ -38,6 +38,7 @@ class Ship:
     waypoints: List[Waypoint] = field(default_factory=list)
     radar_rotation_s: float = 0.0     # 0 disables radar
     color: str = "#1f77b4"
+    start_time_s: float = 0.0         # seconds after t=0 when this ship enters the scene
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Scenario:
     name: str
     region: str                       # "rheinhafen" or "cuxhaven"
     encounter_type: str = "custom"    # crossing | overtaking | head_on | harbor_traffic | custom
+    duration_s: float = 3600.0        # total scenario length (default 1 hour)
     ships: List[Ship] = field(default_factory=list)
 
     def to_dict(self) -> dict:

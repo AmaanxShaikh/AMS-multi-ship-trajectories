@@ -96,6 +96,7 @@ class SimulationManager:
         result_dict: dict,
         dt: float = 1.0,
         cpa_threshold_m: float = CPA_THRESHOLD_M,
+        max_duration_s: float | None = None,
     ):
         self.dt = float(dt)
         self.cpa_threshold_m = float(cpa_threshold_m)
@@ -105,25 +106,47 @@ class SimulationManager:
         self.ships: List[Dict] = []
         for s in result_dict.get("ships", []):
             self.ships.append({
-                "ship_id":    s["ship_id"],
-                "color":      s.get("color", "#1f77b4"),
-                "trajectory": s.get("trajectory", []),
-                "idx":        0,
+                "ship_id":      s["ship_id"],
+                "color":        s.get("color", "#1f77b4"),
+                "trajectory":   s.get("trajectory", []),
+                "start_time_s": float(s.get("start_time_s", 0.0)),
             })
-        self.max_steps = max(
-            (len(s["trajectory"]) for s in self.ships),
-            default=0,
-        )
+        # Each ship's "alive" window on the shared clock.
+        for s in self.ships:
+            traj_dur = (len(s["trajectory"]) - 1) * self.dt if s["trajectory"] else 0.0
+            s["end_time_s"] = s["start_time_s"] + traj_dur
+        # Scenario duration: explicit cap if given, else longest ship end.
+        scenario_end = max((s["end_time_s"] for s in self.ships), default=0.0)
+        if max_duration_s is None:
+            self.max_duration_s = float(
+                result_dict.get("duration_s", scenario_end)
+            )
+        else:
+            self.max_duration_s = float(max_duration_s)
+        self.max_steps = max(1, int(round(self.max_duration_s / self.dt)))
 
     # -----------------------------------------------------------------
 
     def _current_snapshot(self) -> List[dict]:
+        """Only includes ships that are 'alive' at the current shared-clock time.
+
+        A ship is alive between its ``start_time_s`` and the end of its own
+        trajectory (``start_time_s + trajectory_duration``). Outside that
+        window it is invisible to the encounter detector, so two paths that
+        cross on the map are NOT flagged unless both ships are actually
+        present at the same moment.
+        """
         snap: List[dict] = []
         for ship in self.ships:
             traj = ship["trajectory"]
             if not traj:
                 continue
-            idx = min(ship["idx"], len(traj) - 1)
+            if self.time < ship["start_time_s"]:
+                continue                                   # hasn't entered yet
+            if self.time > ship["end_time_s"]:
+                continue                                   # already finished
+            local_t = self.time - ship["start_time_s"]
+            idx = min(int(round(local_t / self.dt)), len(traj) - 1)
             p   = traj[idx]
             snap.append({
                 "ship_id":   ship["ship_id"],
@@ -156,19 +179,18 @@ class SimulationManager:
                 ev_record["t"] = round(self.time, 2)
                 self.all_events.append(ev_record)
 
-        # Advance all ships one step forward
-        for ship in self.ships:
-            if ship["idx"] < len(ship["trajectory"]) - 1:
-                ship["idx"] += 1
         self.time += self.dt
-
         return {"time": round(self.time, 2), "ships": snap, "events": events}
 
     # -----------------------------------------------------------------
 
     def is_done(self) -> bool:
+        # Done when the shared clock has reached the scenario duration AND
+        # every ship has finished its own trajectory.
+        if self.time >= self.max_duration_s:
+            return True
         return all(
-            s["idx"] >= len(s["trajectory"]) - 1
+            self.time > s["end_time_s"]
             for s in self.ships
             if s["trajectory"]
         )
@@ -190,10 +212,18 @@ class SimulationManager:
         for ev in self.all_events:
             by_type[ev["type"]] = by_type.get(ev["type"], 0) + 1
         return {
-            "duration_s":   round(self.max_steps * self.dt, 2),
+            "duration_s":   round(self.max_duration_s, 2),
             "ship_count":   len(self.ships),
             "events_total": len(self.all_events),
             "events_by_type": by_type,
+            "ship_windows": [
+                {
+                    "ship_id":      s["ship_id"],
+                    "start_time_s": round(s["start_time_s"], 2),
+                    "end_time_s":   round(s["end_time_s"],   2),
+                }
+                for s in self.ships
+            ],
             "events":       copy.deepcopy(self.all_events),
         }
 
@@ -221,41 +251,51 @@ def analyse_encounters(
 if __name__ == "__main__":
     from core.physics import scenario_with_physics, EnvParams
 
-    test_scenario = {
-        "name": "manager_test",
-        "region": "rheinhafen",
-        "encounter_type": "crossing",
-        "ships": [
-            {
-                "ship_id": "Ship_1", "mmsi": 211000001, "color": "#1f77b4",
-                "length_m": 100.0, "beam_m": 15.0,
-                "initial_speed_mps": 4.0, "initial_heading_deg": 0.0,
-                "radar_rotation_s": 6.0,
-                "waypoints": [
-                    {"lat": 49.020, "lon": 8.295},
-                    {"lat": 49.060, "lon": 8.305},
-                ],
-            },
-            {
-                "ship_id": "Ship_2", "mmsi": 211000002, "color": "#d62728",
-                "length_m": 80.0, "beam_m": 12.0,
-                "initial_speed_mps": 3.5, "initial_heading_deg": 0.0,
-                "radar_rotation_s": 6.0,
-                "waypoints": [
-                    {"lat": 49.040, "lon": 8.270},
-                    {"lat": 49.040, "lon": 8.330},
-                ],
-            },
-        ],
-    }
+    def make_scenario(ship2_start: float) -> dict:
+        return {
+            "name": "manager_test",
+            "region": "rheinhafen",
+            "encounter_type": "crossing",
+            "duration_s": 7200.0,
+            "ships": [
+                {
+                    "ship_id": "Ship_1", "mmsi": 211000001, "color": "#1f77b4",
+                    "length_m": 100.0, "beam_m": 15.0,
+                    "initial_speed_mps": 4.0, "initial_heading_deg": 0.0,
+                    "radar_rotation_s": 6.0, "start_time_s": 0.0,
+                    "waypoints": [
+                        {"lat": 49.020, "lon": 8.295},
+                        {"lat": 49.060, "lon": 8.305},
+                    ],
+                },
+                {
+                    "ship_id": "Ship_2", "mmsi": 211000002, "color": "#d62728",
+                    "length_m": 80.0, "beam_m": 12.0,
+                    "initial_speed_mps": 3.5, "initial_heading_deg": 0.0,
+                    "radar_rotation_s": 6.0, "start_time_s": ship2_start,
+                    "waypoints": [
+                        {"lat": 49.040, "lon": 8.270},
+                        {"lat": 49.040, "lon": 8.330},
+                    ],
+                },
+            ],
+        }
 
-    result  = scenario_with_physics(test_scenario, env_params=EnvParams(),
-                                    dt=1.0, use_live_wind=False)
-    summary = analyse_encounters(result, dt=1.0)
-    print(f"\nDuration   : {summary['duration_s']} s")
-    print(f"Ships      : {summary['ship_count']}")
-    print(f"Encounters : {summary['events_total']}")
-    print(f"By type    : {summary['events_by_type']}")
-    for ev in summary["events"][:10]:
-        print(f"  t={ev['t']:>6.1f}s  {ev['type']:<10s}  "
-              f"{ev['ships']}  d={ev['distance_m']:.0f}m")
+    def run_and_print(label: str, ship2_start: float) -> None:
+        scen   = make_scenario(ship2_start)
+        result = scenario_with_physics(scen, env_params=EnvParams(),
+                                       dt=1.0, use_live_wind=False)
+        # Forward the timing fields onto the physics result (physics layer
+        # ignores them; manager reads them).
+        for src, dst in zip(scen["ships"], result["ships"]):
+            dst["start_time_s"] = src["start_time_s"]
+        summary = analyse_encounters(result, dt=1.0)
+        print(f"\n=== {label} (Ship_2 start_time_s = {ship2_start}) ===")
+        print(f"Encounters : {summary['events_total']}")
+        print(f"By type    : {summary['events_by_type']}")
+        for ev in summary["events"][:5]:
+            print(f"  t={ev['t']:>6.1f}s  {ev['type']:<10s}  "
+                  f"{ev['ships']}  d={ev['distance_m']:.0f}m")
+
+    run_and_print("Both ships start at t=0 (paths cross at the same time)", 0.0)
+    run_and_print("Ship_2 starts 1 hour late (paths cross but ships do not)", 3600.0)
