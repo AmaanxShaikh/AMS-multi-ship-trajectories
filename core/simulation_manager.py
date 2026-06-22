@@ -105,11 +105,15 @@ class SimulationManager:
         self.ships: List[Dict] = []
         for s in result_dict.get("ships", []):
             self.ships.append({
-                "ship_id":    s["ship_id"],
-                "color":      s.get("color", "#1f77b4"),
-                "trajectory": s.get("trajectory", []),
-                "idx":        0,
+                "ship_id":      s["ship_id"],
+                "color":        s.get("color", "#1f77b4"),
+                "trajectory":   s.get("trajectory", []),
+                "start_time_s": float(s.get("start_time_s", 0.0)),
             })
+        # Each ship's "alive" window on the shared clock.
+        for s in self.ships:
+            traj_dur = (len(s["trajectory"]) - 1) * self.dt if s["trajectory"] else 0.0
+            s["end_time_s"] = s["start_time_s"] + traj_dur
         self.max_steps = max(
             (len(s["trajectory"]) for s in self.ships),
             default=0,
@@ -118,12 +122,25 @@ class SimulationManager:
     # -----------------------------------------------------------------
 
     def _current_snapshot(self) -> List[dict]:
+        """Only includes ships that are 'alive' at the current shared-clock time.
+
+        A ship is alive between its ``start_time_s`` and the end of its own
+        trajectory (``start_time_s + trajectory_duration``). Outside that
+        window it is invisible to the encounter detector, so two paths that
+        cross on the map are NOT flagged unless both ships are actually
+        present at the same moment.
+        """
         snap: List[dict] = []
         for ship in self.ships:
             traj = ship["trajectory"]
             if not traj:
                 continue
-            idx = min(ship["idx"], len(traj) - 1)
+            if self.time < ship["start_time_s"]:
+                continue                                   # hasn't entered yet
+            if self.time > ship["end_time_s"]:
+                continue                                   # already finished
+            local_t = self.time - ship["start_time_s"]
+            idx = min(int(round(local_t / self.dt)), len(traj) - 1)
             p   = traj[idx]
             snap.append({
                 "ship_id":   ship["ship_id"],
@@ -156,19 +173,15 @@ class SimulationManager:
                 ev_record["t"] = round(self.time, 2)
                 self.all_events.append(ev_record)
 
-        # Advance all ships one step forward
-        for ship in self.ships:
-            if ship["idx"] < len(ship["trajectory"]) - 1:
-                ship["idx"] += 1
         self.time += self.dt
-
         return {"time": round(self.time, 2), "ships": snap, "events": events}
 
     # -----------------------------------------------------------------
 
     def is_done(self) -> bool:
+        # Done when every ship has finished its own trajectory.
         return all(
-            s["idx"] >= len(s["trajectory"]) - 1
+            self.time > s["end_time_s"]
             for s in self.ships
             if s["trajectory"]
         )
