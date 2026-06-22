@@ -38,6 +38,7 @@ class Ship:
     waypoints: List[Waypoint] = field(default_factory=list)
     radar_rotation_s: float = 0.0     # 0 disables radar
     color: str = "#1f77b4"
+    start_time_s: float = 0.0         # seconds after t=0 when this ship enters the scene
 
 
 @dataclass
