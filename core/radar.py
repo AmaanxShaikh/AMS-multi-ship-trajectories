@@ -59,6 +59,25 @@ def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     y = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlon)
     return (math.degrees(math.atan2(x, y)) + 360) % 360
 
+def _beam_angle(t: float, rotation_period: float) -> float:
+    return (360.0 * t / rotation_period) % 360.0
+
+
+def _angle_difference(a: float, b: float) -> float:
+    diff = abs(a - b) % 360.0
+    return min(diff, 360.0 - diff)
+
+
+def _target_in_beam(beam_angle: float, target_bearing: float, beam_width_deg: float = 4.0,) -> bool:
+    return (
+        _angle_difference(
+            beam_angle,
+            target_bearing
+        )
+        <= beam_width_deg / 2.0
+    )
+
+
 
 # ---------------------------------------------------------------------------
 # Radar cross-section (RCS) proxy
@@ -98,6 +117,72 @@ class RadarReturn:
 # ---------------------------------------------------------------------------
 # Main simulation
 # ---------------------------------------------------------------------------
+
+def simulate_ship_radar(
+    trajectories,
+    radar_rotation_s=6.0,
+    beam_width_deg=4.0,
+):
+    detections = []
+
+    for radar_ship in trajectories:
+
+        for target_ship in trajectories:
+
+            if radar_ship.ship_id == target_ship.ship_id:
+                continue
+
+            max_steps = min(
+                len(radar_ship.points),
+                len(target_ship.points)
+            )
+
+            for i in range(max_steps):
+
+                radar_p = radar_ship.points[i]
+                target_p = target_ship.points[i]
+
+                bearing = _bearing(
+                    radar_p.lat,
+                    radar_p.lon,
+                    target_p.lat,
+                    target_p.lon
+                )
+
+                range_m = _haversine(
+                    radar_p.lat,
+                    radar_p.lon,
+                    target_p.lat,
+                    target_p.lon
+                )
+
+                beam_angle = _beam_angle(
+                    radar_p.t,
+                    radar_rotation_s
+                )
+
+                detected = _target_in_beam(
+                    beam_angle,
+                    bearing,
+                    beam_width_deg
+                )
+
+                if detected:
+                    detections.append({
+                        "radar_ship": radar_ship.ship_id,
+                        "target_ship": target_ship.ship_id,
+                        "time": round(radar_p.t, 2),
+                        "radar_lat": radar_p.lat,
+                        "radar_lon": radar_p.lon,
+                        "target_lat": target_p.lat,
+                        "target_lon": target_p.lon,
+                        "beam_angle": round(beam_angle, 2),
+                        "bearing": round(bearing, 2),
+                        "range_m": round(range_m, 1),
+                        "detected": True,
+                    })
+
+    return detections
 
 def simulate_radar(
     trajectories: list,               # List[ShipTrajectory] from trajectory.py
@@ -241,6 +326,16 @@ if __name__ == "__main__":
                     {"lat": 49.040, "lon": 8.330},
                 ],
             },
+            {
+                "ship_id": "Ship_3", "mmsi": 211000003,
+                "color": "#2ca02c", "length_m": 90.0, "beam_m": 14.0,
+                "initial_speed_mps": 3.0, "initial_heading_deg": 0.0,
+                "radar_rotation_s": 6.0,
+                "waypoints": [
+                    {"lat": 49.030, "lon": 8.280},
+                    {"lat": 49.050, "lon": 8.320},
+                ],
+            },
         ],
     }
 
@@ -252,3 +347,98 @@ if __name__ == "__main__":
     for r in returns[:5]:
         print(f"  {r.ship_id} | sweep {r.sweep} | t={r.t:.0f}s | "
               f"range={r.range_m:.0f}m | az={r.azimuth:.1f}° | RCS={r.rcs_dbm2}dBm²")
+
+    #**************************************************************************
+
+    print("\n=== Beam Rotation Test ===")
+
+    for t in range(7):
+        beam = _beam_angle(t, 6.0)
+
+        print(
+            f"t={t}s",
+            f"beam={beam:.1f}°"
+        )
+    
+    #***************************************************************************
+
+    print("\n=== Detection Test ===")
+
+    target_bearing = 182
+
+    for t in range(7):
+        beam = _beam_angle(t, 6.0)
+
+        detected = _target_in_beam(
+            beam,
+            target_bearing,
+            10.0
+        )
+
+        print(
+            f"beam={beam:.1f}°",
+            f"target={target_bearing}°",
+            f"detected={detected}"
+        )
+
+    #**************************************************************************
+
+    # print("\n=== Ship Radar Test ===")
+
+    detections = simulate_ship_radar(
+        trajs,
+        radar_rotation_s=6.0,
+        beam_width_deg=4.0
+    )
+
+    # print(f"Detections: {len(detections)}")
+
+    # for d in detections[:10]:
+    #     print(d)
+
+    print("\n=== Radar Participation Test ===")
+
+    radar_ships = set()
+    target_ships = set()
+
+    for d in detections:
+        radar_ships.add(d["radar_ship"])
+        target_ships.add(d["target_ship"])
+
+    print("Radar Ships:")
+    for ship in sorted(radar_ships):
+        print(f"  {ship}")
+
+    print("\nTarget Ships:")
+    for ship in sorted(target_ships):
+        print(f"  {ship}")
+
+    print("\n=== Detection Count Per Radar Ship ===")
+
+    counts = {}
+
+    for d in detections:
+        counts[d["radar_ship"]] = counts.get(
+            d["radar_ship"], 0
+        ) + 1
+
+    for ship, count in counts.items():
+        print(f"{ship}: {count} detections")
+
+    print("\n=== Detection Pairs ===")
+
+    pairs = {}
+
+    for d in detections:
+        pair = (
+            d["radar_ship"],
+            d["target_ship"]
+        )
+
+        pairs[pair] = pairs.get(pair, 0) + 1
+
+    for pair, count in pairs.items():
+        print(
+            f"{pair[0]} -> {pair[1]} : "
+            f"{count} detections"
+        )
