@@ -54,6 +54,7 @@ class Scenario:
     name: str
     region: str                       # "rheinhafen" or "cuxhaven"
     encounter_type: str = "custom"    # crossing | overtaking | head_on | harbor_traffic | custom
+    duration_s: float = 3600.0        # total scenario length (default 1 hour)
     ships: List[Ship] = field(default_factory=list)
 
     def to_dict(self) -> dict:
