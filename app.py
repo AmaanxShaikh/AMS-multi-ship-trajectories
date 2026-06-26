@@ -379,15 +379,23 @@ def _build_folium_map(region: Region, tiles: str) -> folium.Map:
 # ---------------------------------------------------------------------------
 
 def _build_animation(result: dict, region: Region,
-                     map_style: str, speed_ms: int) -> go.Figure:
+                     map_style: str, speed_ms: int,
+                     visible_ship_ids: List[str] | None = None,
+                     window_start_s: float = 0.0,
+                     window_end_s:   float | None = None) -> go.Figure:
     """Animate ships on the shared simulation clock.
 
     Each ship is hidden before its ``start_time_s`` and held at its last
     point after its trajectory ends, so a ship that enters at t=600s
     actually appears 600s into the animation.
+
+    ``visible_ship_ids`` filters which ships are drawn at all.
+    ``window_start_s`` / ``window_end_s`` restrict the timeline played.
     """
     fig   = go.Figure()
     ships = result.get("ships", [])
+    if visible_ship_ids is not None:
+        ships = [s for s in ships if s["ship_id"] in visible_ship_ids]
 
     # Line of Sight — dotted light blue
     if region.los:
@@ -438,12 +446,15 @@ def _build_animation(result: dict, region: Region,
         default=0.0,
     )
     timeline_end = max(float(result.get("duration_s", scenario_end)), scenario_end)
+    if window_end_s is not None:
+        timeline_end = min(timeline_end, float(window_end_s))
+    timeline_start = max(0.0, float(window_start_s))
 
     radar_s = ships[0].get("radar_rotation_s", 6.0) if ships else 6.0
     step    = max(1.0, float(radar_s))                 # seconds per frame
     frames  = []
 
-    t  = 0.0
+    t  = timeline_start
     fi = 0
     while t <= timeline_end + 1e-6:
         fd = []
@@ -668,11 +679,37 @@ if st.session_state.get("trajectory_result"):
 if st.session_state.get("trajectory_result"):
     result = st.session_state["trajectory_result"]
     st.subheader("3. Simulation Visualisation")
-    speed_ms = st.slider("Animation Speed (ms/frame)", 50, 800, 200, 50)
-    fig_anim = _build_animation(result, region, map_style_plotly, speed_ms)
+
+    all_ship_ids = [s["ship_id"] for s in result.get("ships", [])]
+    scenario_end = float(result.get("duration_s", 3600.0))
+
+    fc1, fc2 = st.columns([1, 2])
+    with fc1:
+        visible_ids = st.multiselect(
+            "Show ships", all_ship_ids, default=all_ship_ids,
+            help="Hide individual ships to focus on a subset.",
+        )
+        speed_ms = st.slider("Animation Speed (ms/frame)", 50, 800, 200, 50)
+    with fc2:
+        window = st.slider(
+            "Time window (s)", 0.0, max(scenario_end, 60.0),
+            (0.0, max(scenario_end, 60.0)), 10.0,
+            help="Restrict the animation timeline to a subrange of the "
+                 "scenario clock, e.g. play only the 10-minute slice "
+                 "where the interesting traffic happens.",
+        )
+
+    fig_anim = _build_animation(
+        result, region, map_style_plotly, speed_ms,
+        visible_ship_ids=visible_ids,
+        window_start_s=window[0],
+        window_end_s=window[1],
+    )
     st.plotly_chart(fig_anim, use_container_width=True)
-    st.caption("▶️ Play animates all ships simultaneously. "
-               "Trail shows recent path. Ship position shown as red dot.")
+    st.caption(
+        "▶️ Play animates ships on the shared simulation clock. Use the "
+        "filters above to focus on specific ships or a time slice."
+    )
     st.markdown("---")
 
 
