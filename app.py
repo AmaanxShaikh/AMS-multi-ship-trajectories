@@ -88,6 +88,25 @@ def _point_in_region(lat: float, lon: float, region: Region) -> bool:
     return poly.contains(Point(lon, lat))
 
 
+def _count_out_of_bounds(result: dict, region: Region) -> dict[str, int]:
+    """Count trajectory points outside the working-area polygon, per ship.
+
+    Returns a {ship_id: count} mapping. Ships fully inside the polygon map
+    to 0. If the region has no polygon defined, every ship maps to 0.
+    """
+    poly = _region_polygon(region)
+    counts: dict[str, int] = {}
+    if poly is None:
+        return {s["ship_id"]: 0 for s in result.get("ships", [])}
+    for ship in result.get("ships", []):
+        n_out = sum(
+            1 for p in ship.get("trajectory", [])
+            if not poly.contains(Point(p["lon"], p["lat"]))
+        )
+        counts[ship["ship_id"]] = n_out
+    return counts
+
+
 def _clear_sim() -> None:
     for k in ["sim_step", "sim_trajs", "sim_ids", "sim_colors"]:
         st.session_state.pop(k, None)
