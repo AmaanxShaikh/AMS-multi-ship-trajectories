@@ -688,6 +688,20 @@ if st.session_state.get("trajectory_result"):
             mime="application/json")
     with st.expander("Preview JSON"):
         st.code(json.dumps(result, indent=2)[:2000] + "\n...", language="json")
+
+    # Working-area boundary check — flag any ship whose trajectory exits
+    # the orange polygon (supervisor: "should not go outside the polygon").
+    oob = _count_out_of_bounds(result, region)
+    total_oob = sum(oob.values())
+    if total_oob == 0:
+        st.success("✅ All ships stayed inside the working-area boundary.")
+    else:
+        offenders = [f"**{sid}** ({n} pts)"
+                     for sid, n in oob.items() if n > 0]
+        st.warning(
+            "⚠️ Some trajectories exit the working-area polygon: "
+            + ", ".join(offenders)
+        )
     st.markdown("---")
 
 
