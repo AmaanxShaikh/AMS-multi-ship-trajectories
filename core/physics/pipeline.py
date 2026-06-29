@@ -197,14 +197,16 @@ def build_trajectory_physics(
     start = waypoints[0]
     end   = waypoints[-1]
 
-    # Build LOS reference path
-    los_path = _build_los_path(start, end, region_key)
-    if len(los_path) < 2:
-        los_path = [start, end]
-
-    # Offset the path slightly to the right (matches old 20 m offset for Rheinhafen)
-    # For simplicity we skip the pyproj offset here and use the raw LOS
-    simulation_path = los_path
+    # If the user supplied 3+ waypoints, treat them as explicit via-points
+    # the ship must visit in order. Otherwise (just start + end) fall back
+    # to the LOS routing for a realistic fairway path.
+    if len(waypoints) >= 3:
+        simulation_path = list(waypoints)
+    else:
+        los_path = _build_los_path(start, end, region_key)
+        if len(los_path) < 2:
+            los_path = [start, end]
+        simulation_path = los_path
 
     # Initialise ship state
     from core.physics.coordinate_utils import bearing as _brg
