@@ -674,10 +674,12 @@ if st.session_state.get("trajectory_result"):
         for ship in result["ships"]:
             pts = ship.get("trajectory", [])
             rrs = ship.get("radar_returns", [])
+            wps = ship.get("waypoints", [])
             if pts:
                 st.markdown(
                     f"<span style='color:{ship['color']}'>●</span> "
-                    f"**{ship['ship_id']}** — {len(pts)} traj pts · "
+                    f"**{ship['ship_id']}** — {len(wps)} waypoints · "
+                    f"{len(pts)} traj pts · "
                     f"{len(rrs)} radar returns · {pts[-1]['t']:.1f} s",
                     unsafe_allow_html=True)
     with col_b:
