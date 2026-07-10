@@ -94,6 +94,21 @@ def _point_in_region(lat: float, lon: float, region: Region) -> bool:
     return poly.contains(Point(lon, lat))
 
 
+def _snap_to_los(lat: float, lon: float, region: Region) -> tuple[float, float]:
+    """Return the point on the region's LOS line closest to (lat, lon).
+
+    Used to correct auto-generated waypoints that were placed slightly off
+    the river so ships don't try to sail on land.
+    """
+    if not region.los:
+        return lat, lon
+    from shapely.geometry import LineString, Point as _Pt
+    line = LineString([(ln, la) for (la, ln) in region.los])
+    p = _Pt(lon, lat)
+    nearest = line.interpolate(line.project(p))
+    return (nearest.y, nearest.x)
+
+
 def _count_out_of_bounds(result: dict, region: Region) -> dict[str, int]:
     """Count trajectory points outside the working-area polygon, per ship.
 
@@ -175,14 +190,13 @@ with st.sidebar:
             use_container_width=True,
         ):
             raw_ships = build_scenario(encounter_type, location_style)
-            # Validate all auto-generated waypoints are inside the boundary
-            poly = _region_polygon(region)
-            if poly is not None:
-                for s in raw_ships:
-                    s["waypoints"] = [
-                        (lat, lon) for (lat, lon) in s["waypoints"]
-                        if poly.contains(Point(lon, lat))
-                    ]
+            # Snap every auto-generated waypoint to the nearest point on the
+            # LOS centerline so ships always start/end on the actual river.
+            for s in raw_ships:
+                s["waypoints"] = [
+                    _snap_to_los(lat, lon, region)
+                    for (lat, lon) in s["waypoints"]
+                ]
             st.session_state["ships"] = raw_ships
             st.session_state["active_ship_idx"] = 0 if raw_ships else None
             st.session_state["trajectory_result"] = None
