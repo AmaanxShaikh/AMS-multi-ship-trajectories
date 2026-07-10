@@ -1,5 +1,5 @@
-"""Maritime Scenario Builder — Streamlit front-end.
-MMG physics model — no constant-velocity fallback.
+"""Maritime Scenario Builder - Streamlit front-end.
+MMG physics model - no constant-velocity fallback.
 """
 
 from __future__ import annotations
@@ -81,6 +81,12 @@ def _region_polygon(region: Region) -> Polygon | None:
     return Polygon([(lon, lat) for (lat, lon) in region.bbox])
 
 
+def _corridor_polygon(region: Region) -> Polygon | None:
+    if not region.river_corridor:
+        return None
+    return Polygon([(lon, lat) for (lat, lon) in region.river_corridor])
+
+
 def _point_in_region(lat: float, lon: float, region: Region) -> bool:
     poly = _region_polygon(region)
     if poly is None:
@@ -154,7 +160,7 @@ with st.sidebar:
 
     scenario_name = st.text_input(
         "Scenario name",
-        value=f"{region.display_name} — {encounter_labels[encounter_type]}",
+        value=f"{region.display_name} - {encounter_labels[encounter_type]}",
     )
     scenario_duration_s = st.number_input(
         "Scenario duration (s)", 60.0, 36000.0, 3600.0, 60.0,
@@ -165,7 +171,7 @@ with st.sidebar:
 
     if encounter_type != "custom":
         if st.button(
-            f"⚡ Auto-Generate: {encounter_labels[encounter_type]}",
+            f"Auto-Generate: {encounter_labels[encounter_type]}",
             use_container_width=True,
         ):
             raw_ships = build_scenario(encounter_type, location_style)
@@ -188,11 +194,11 @@ with st.sidebar:
     st.subheader("Ships")
 
     col_add, col_rm = st.columns(2)
-    if col_add.button("➕ Add Ship", use_container_width=True):
+    if col_add.button("Add Ship", use_container_width=True):
         st.session_state["ships"].append(_new_ship_dict(len(st.session_state["ships"])))
         st.session_state["active_ship_idx"] = len(st.session_state["ships"]) - 1
 
-    if col_rm.button("🗑 Clear All", use_container_width=True):
+    if col_rm.button("Clear All", use_container_width=True):
         st.session_state["ships"] = []
         st.session_state["active_ship_idx"] = None
         st.session_state["trajectory_result"] = None
@@ -201,7 +207,7 @@ with st.sidebar:
         st.rerun()
 
     if not st.session_state["ships"]:
-        st.info("Use ⚡ Auto-Generate or ➕ Add Ship to begin.")
+        st.info("Use Auto-Generate or Add Ship to begin.")
     else:
         ship_labels = [s["ship_id"] for s in st.session_state["ships"]]
         active = st.selectbox(
@@ -213,7 +219,7 @@ with st.sidebar:
         st.session_state["active_ship_idx"] = active
         s = st.session_state["ships"][active]
 
-        with st.expander(f"⚙ {s['ship_id']} parameters", expanded=False):
+        with st.expander(f"{s['ship_id']} parameters", expanded=False):
             s["ship_id"] = st.text_input("Ship ID", s["ship_id"], key=f"id_{active}")
             s["mmsi"]    = st.number_input("MMSI", 100_000_000, 999_999_999,
                                            int(s["mmsi"]), 1, key=f"mmsi_{active}")
@@ -236,7 +242,7 @@ with st.sidebar:
             s["color"] = st.color_picker("Color", s["color"], key=f"col_{active}")
 
             cu, cc, cr = st.columns(3)
-            if cu.button("↶ Undo",  key=f"undo_{active}", disabled=not s["waypoints"], use_container_width=True):
+            if cu.button("Undo",  key=f"undo_{active}", disabled=not s["waypoints"], use_container_width=True):
                 s["waypoints"].pop(); st.rerun()
             if cc.button("Clear",   key=f"clr_{active}",  disabled=not s["waypoints"], use_container_width=True):
                 s["waypoints"] = []; st.rerun()
@@ -250,7 +256,7 @@ with st.sidebar:
     # Environment (MMG physics inputs)
     # -----------------------------------------------------------------------
     st.markdown("---")
-    st.subheader("🌊 Environment")
+    st.subheader("Environment")
 
     wind_speed    = st.slider("Wind speed (m/s)",    0.0,  20.0,  0.0, 0.5)
     wind_dir      = st.slider("Wind direction (°)",  0,    360,   0,   5)
@@ -275,8 +281,8 @@ with st.sidebar:
     scenario = _ui_to_scenario(scenario_name, location_style, encounter_type,
                                scenario_duration_s)
     st.download_button(
-        "⬇ Save Scenario (JSON)", data=scenario.to_json(),
-        file_name=f"{scenario_name.replace(' ','_').replace('—','-')}.json",
+        "Save Scenario (JSON)", data=scenario.to_json(),
+        file_name=f"{scenario_name.replace(' ','_').replace('-','-')}.json",
         mime="application/json", use_container_width=True,
         disabled=not st.session_state["ships"],
     )
@@ -284,7 +290,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Run Simulation")
 
-    if st.button("▶ Build Trajectories (MMG Physics)",
+    if st.button("Build Trajectories (MMG Physics)",
                  disabled=not st.session_state["ships"],
                  use_container_width=True):
         missing = [s["ship_id"] for s in st.session_state["ships"]
@@ -301,7 +307,7 @@ with st.sidebar:
                 current_dir_deg   = float(current_dir),
             )
 
-            with st.spinner("Running MMG physics simulation…"):
+            with st.spinner("Running MMG physics simulation"):
                 scen_dict = scenario.to_dict()
                 result    = scenario_with_physics(
                     scen_dict,
@@ -322,7 +328,7 @@ with st.sidebar:
                             if st.session_state["ships"] else 6.0)
             result = embed_radar_in_scenario(result, radar_origin, radar_s)
 
-            with st.spinner("Running encounter analysis…"):
+            with st.spinner("Running encounter analysis"):
                 mgr = SimulationManager(
                     result, dt=1.0,
                     max_duration_s=float(scenario_duration_s),
@@ -337,7 +343,7 @@ with st.sidebar:
             st.rerun()
 
     if st.session_state.get("sim_running"):
-        if st.button("⏹ Stop", use_container_width=True):
+        if st.button("Stop", use_container_width=True):
             _clear_sim(); st.rerun()
 
 
@@ -362,8 +368,15 @@ def _build_folium_map(region: Region, tiles: str) -> folium.Map:
                       zoom_start=region.default_zoom, tiles=tiles)
     if region.bbox:
         folium.Polygon(locations=region.bbox, color="#d7191c", weight=2,
-                       fill=True, fill_color="#fdae61", fill_opacity=0.25,
+                       fill=True, fill_color="#fdae61", fill_opacity=0.15,
                        tooltip="Working Area").add_to(fmap)
+    if region.river_corridor:
+        folium.Polygon(
+            locations=region.river_corridor,
+            color="#2b83ba", weight=2,
+            fill=True, fill_color="#abd9e9", fill_opacity=0.35,
+            tooltip=f"Navigable river corridor ({region.corridor_width_m:.0f} m)",
+        ).add_to(fmap)
     if region.los:
         folium.PolyLine(locations=region.los, color="#5bc8f5", weight=2,
                         dash_array="6,8", opacity=0.9,
@@ -381,7 +394,7 @@ def _build_folium_map(region: Region, tiles: str) -> folium.Map:
                 icon="ship" if j == 0 else "flag-checkered" if j == len(wps) - 1 and len(wps) > 1 else "circle",
                 prefix="fa",
             )
-            label = (f"{ship['ship_id']} — "
+            label = (f"{ship['ship_id']} - "
                      + ("start" if j == 0
                         else "end" if j == len(wps) - 1 and len(wps) > 1
                         else f"wp {j+1}"))
@@ -416,7 +429,7 @@ def _build_animation(result: dict, region: Region,
     if visible_ship_ids is not None:
         ships = [s for s in ships if s["ship_id"] in visible_ship_ids]
 
-    # Line of Sight — dotted light blue
+    # Line of Sight - dotted light blue
     if region.los:
         fig.add_trace(go.Scattermap(
             lon=[p[1] for p in region.los], lat=[p[0] for p in region.los],
@@ -440,17 +453,17 @@ def _build_animation(result: dict, region: Region,
         traj = ship.get("trajectory", [])
         if not traj or meta is None:
             continue
-        # Ship Path — solid line, faint ghost
+        # Ship Path - solid line, faint ghost
         fig.add_trace(go.Scattermap(
             lon=[p["lon"] for p in traj], lat=[p["lat"] for p in traj],
             mode="lines", line=dict(width=2, color=ship["color"]),
             name=f"{ship['ship_id']} path", opacity=0.3))
-        # Animated trail placeholder — empty until the ship enters
+        # Animated trail placeholder - empty until the ship enters
         fig.add_trace(go.Scattermap(
             lon=[], lat=[],
             mode="lines", line=dict(width=3, color=ship["color"]),
             name=f"{ship['ship_id']} trail"))
-        # Ship Position — empty until entry, then a red dot
+        # Ship Position - empty until entry, then a red dot
         fig.add_trace(go.Scattermap(
             lon=[], lat=[],
             mode="markers+text",
@@ -478,7 +491,7 @@ def _build_animation(result: dict, region: Region,
     while t <= timeline_end + 1e-6:
         fd = []
 
-        # LOS in every frame — dotted light blue
+        # LOS in every frame - dotted light blue
         if region.los:
             fd.append(go.Scattermap(
                 lon=[p[1] for p in region.los], lat=[p[0] for p in region.los],
@@ -490,7 +503,7 @@ def _build_animation(result: dict, region: Region,
         for ship, meta in zip(ships, ship_meta):
             traj = ship.get("trajectory", [])
 
-            # Ship Path ghost — solid, faint (always visible for context)
+            # Ship Path ghost - solid, faint (always visible for context)
             fd.append(go.Scattermap(
                 lon=[p["lon"] for p in traj], lat=[p["lat"] for p in traj],
                 mode="lines", line=dict(width=2, color=ship["color"]), opacity=0.15))
@@ -502,7 +515,7 @@ def _build_animation(result: dict, region: Region,
 
             local_t = t - meta["start_s"]
             if local_t < 0:
-                # Ship has not entered the scene yet — hide it.
+                # Ship has not entered the scene yet - hide it.
                 fd.append(go.Scattermap(lon=[], lat=[], mode="lines"))
                 fd.append(go.Scattermap(lon=[], lat=[], mode="markers"))
                 continue
@@ -513,14 +526,14 @@ def _build_animation(result: dict, region: Region,
             done  = t > meta["end_s"]
             label = (f"{ship['ship_id']} t={t:.0f}s "
                      f"{cur['heading']:.0f}°"
-                     + (" ⛔" if done else ""))
+                     + ("" if done else ""))
 
-            # Animated trail — solid ship color
+            # Animated trail - solid ship color
             fd.append(go.Scattermap(
                 lon=[p["lon"] for p in trail], lat=[p["lat"] for p in trail],
                 mode="lines", line=dict(width=3, color=ship["color"])))
 
-            # Ship Position — red dot
+            # Ship Position - red dot
             fd.append(go.Scattermap(
                 lon=[cur["lon"]], lat=[cur["lat"]],
                 mode="markers+text",
@@ -545,14 +558,14 @@ def _build_animation(result: dict, region: Region,
             bgcolor="rgba(255,255,255,0.15)", bordercolor="#DDD", borderwidth=1,
             pad={"r": 10, "t": 10, "b": 10},
             buttons=[
-                dict(label="▶️ Play", method="animate",
+                dict(label="Play", method="animate",
                      args=[None, {"frame": {"duration": speed_ms, "redraw": True},
                                   "fromcurrent": True, "mode": "immediate"}]),
-                dict(label="⏹ Stop", method="animate",
+                dict(label="Stop", method="animate",
                      args=[[None], {"frame": {"duration": 0, "redraw": False},
                                     "mode": "immediate",
                                     "transition": {"duration": 0}}]),
-                dict(label="⏮ Reset", method="animate",
+                dict(label="Reset", method="animate",
                      args=[["f0"], {"frame": {"duration": 0, "redraw": True},
                                     "mode": "immediate",
                                     "transition": {"duration": 0}}]),
@@ -586,7 +599,7 @@ def _build_radar_polar(result: dict) -> go.Figure:
                 "Az: %{theta:.1f}°<extra></extra>"),
         ))
     fig.update_layout(
-        title="Radar Returns — Range vs Azimuth",
+        title="Radar Returns - Range vs Azimuth",
         polar=dict(radialaxis=dict(visible=True, title="Range (m)"),
                    angularaxis=dict(direction="clockwise", rotation=90)),
         height=380, showlegend=True,
@@ -615,7 +628,7 @@ with col1:
                     st.warning("Add a ship first.")
                 else:
                     if not _point_in_region(click["lat"], click["lng"], region):
-                        st.warning("⛔ Click inside the orange boundary — that point is outside the working area.")
+                        st.warning("Click inside the orange boundary - that point is outside the working area.")
                     else:
                         active = st.session_state["active_ship_idx"]
                         st.session_state["ships"][active]["waypoints"].append(
@@ -623,26 +636,26 @@ with col1:
                         st.rerun()
 
     st.caption("Click inside the orange boundary to add waypoints, "
-               "or use ⚡ Auto-Generate in the sidebar.")
+               "or use Auto-Generate in the sidebar.")
 
 with col2:
     st.subheader("Scenario Status")
     if not st.session_state["ships"]:
         st.warning("No ships yet")
-        st.info("Use **⚡ Auto-Generate** or **➕ Add Ship**.")
+        st.info("Use **Auto-Generate** or **Add Ship**.")
     else:
         total_wps = sum(len(s["waypoints"]) for s in st.session_state["ships"])
         st.markdown(
             f"<p class='small-font'><b>{len(st.session_state['ships'])}</b> ship(s), "
             f"<b>{total_wps}</b> waypoint(s)</p>", unsafe_allow_html=True)
         for i, s in enumerate(st.session_state["ships"]):
-            badge = "🟢" if i == st.session_state["active_ship_idx"] else "⚪"
+            badge = "" if i == st.session_state["active_ship_idx"] else ""
             n     = len(s["waypoints"])
-            line  = (f"{badge} **{s['ship_id']}** — "
+            line  = (f"{badge} **{s['ship_id']}** - "
                      + ("no waypoints" if n == 0
                         else "end pending" if n == 1
-                        else f"{n} wps ✅"))
-            st.markdown(f"<span style='color:{s['color']}'>●</span> {line}",
+                        else f"{n} wps"))
+            st.markdown(f"<span style='color:{s['color']}'></span> {line}",
                         unsafe_allow_html=True)
             if s["waypoints"]:
                 st.markdown(
@@ -661,7 +674,7 @@ with col2:
 
 
 # ---------------------------------------------------------------------------
-# Section 2 — Trajectory output
+# Section 2 - Trajectory output
 # ---------------------------------------------------------------------------
 
 st.markdown("---")
@@ -677,38 +690,38 @@ if st.session_state.get("trajectory_result"):
             wps = ship.get("waypoints", [])
             if pts:
                 st.markdown(
-                    f"<span style='color:{ship['color']}'>●</span> "
-                    f"**{ship['ship_id']}** — {len(wps)} waypoints · "
+                    f"<span style='color:{ship['color']}'></span> "
+                    f"**{ship['ship_id']}** - {len(wps)} waypoints · "
                     f"{len(pts)} traj pts · "
                     f"{len(rrs)} radar returns · {pts[-1]['t']:.1f} s",
                     unsafe_allow_html=True)
     with col_b:
         st.download_button(
-            "⬇ Download Full JSON",
+            "Download Full JSON",
             data=json.dumps(result, indent=2),
             file_name="multi_ship_simulation.json",
             mime="application/json")
     with st.expander("Preview JSON"):
         st.code(json.dumps(result, indent=2)[:2000] + "\n...", language="json")
 
-    # Working-area boundary check — flag any ship whose trajectory exits
+    # Working-area boundary check - flag any ship whose trajectory exits
     # the orange polygon (supervisor: "should not go outside the polygon").
     oob = _count_out_of_bounds(result, region)
     total_oob = sum(oob.values())
     if total_oob == 0:
-        st.success("✅ All ships stayed inside the working-area boundary.")
+        st.success("All ships stayed inside the working-area boundary.")
     else:
         offenders = [f"**{sid}** ({n} pts)"
                      for sid, n in oob.items() if n > 0]
         st.warning(
-            "⚠️ Some trajectories exit the working-area polygon: "
+            "Some trajectories exit the working-area polygon: "
             + ", ".join(offenders)
         )
     st.markdown("---")
 
 
 # ---------------------------------------------------------------------------
-# Section 3 — Animated visualisation
+# Section 3 - Animated visualisation
 # ---------------------------------------------------------------------------
 
 if st.session_state.get("trajectory_result"):
@@ -742,14 +755,14 @@ if st.session_state.get("trajectory_result"):
     )
     st.plotly_chart(fig_anim, use_container_width=True)
     st.caption(
-        "▶️ Play animates ships on the shared simulation clock. Use the "
+        "Play animates ships on the shared simulation clock. Use the "
         "filters above to focus on specific ships or a time slice."
     )
     st.markdown("---")
 
 
 # ---------------------------------------------------------------------------
-# Section 4 — Radar visualisation
+# Section 4 - Radar visualisation
 # ---------------------------------------------------------------------------
 
 if st.session_state.get("radar_result"):
@@ -767,11 +780,11 @@ if st.session_state.get("radar_result"):
             ranges = [r["range_m"]  for r in rrs]
             azs    = [r["azimuth"]  for r in rrs]
             st.markdown(
-                f"<span style='color:{ship['color']}'>●</span> "
+                f"<span style='color:{ship['color']}'></span> "
                 f"**{ship['ship_id']}**<br>"
                 f"&nbsp;&nbsp;Sweeps: {len(rrs)}<br>"
-                f"&nbsp;&nbsp;Range: {min(ranges):.0f}–{max(ranges):.0f} m<br>"
-                f"&nbsp;&nbsp;Azimuth: {min(azs):.1f}°–{max(azs):.1f}°<br>"
+                f"&nbsp;&nbsp;Range: {min(ranges):.0f}-{max(ranges):.0f} m<br>"
+                f"&nbsp;&nbsp;Azimuth: {min(azs):.1f}°-{max(azs):.1f}°<br>"
                 f"&nbsp;&nbsp;RCS: {rrs[0]['rcs_dbm2']} dBm²",
                 unsafe_allow_html=True)
             st.markdown("")
@@ -779,15 +792,15 @@ if st.session_state.get("radar_result"):
 
 
 # ---------------------------------------------------------------------------
-# Section 5 — Encounter analysis (multi-ship simulation manager)
+# Section 5 - Encounter analysis (multi-ship simulation manager)
 # ---------------------------------------------------------------------------
 
 if st.session_state.get("encounter_summary"):
     summary = st.session_state["encounter_summary"]
     st.subheader("5. Encounter Analysis")
 
-    icon = {"head_on": "🚨", "crossing": "⚠️",
-            "overtaking": "↗️", "following": "➡️"}
+    icon = {"head_on": "", "crossing": "",
+            "overtaking": "", "following": ""}
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Duration",  f"{summary['duration_s']:.0f} s")
@@ -796,7 +809,7 @@ if st.session_state.get("encounter_summary"):
     by_type = summary["events_by_type"]
     worst   = "head_on" if by_type.get("head_on") else (
               "crossing" if by_type.get("crossing") else (
-              "overtaking" if by_type.get("overtaking") else "—"))
+              "overtaking" if by_type.get("overtaking") else "-"))
     m4.metric("Worst type", f"{icon.get(worst,'')} {worst}")
 
     if by_type:
@@ -808,23 +821,23 @@ if st.session_state.get("encounter_summary"):
         st.markdown("**Ship presence on the shared clock**")
         for w in windows:
             st.markdown(
-                f"&nbsp;&nbsp;**{w['ship_id']}** — alive "
-                f"`t={w['start_time_s']:.0f}s → {w['end_time_s']:.0f}s`",
+                f"&nbsp;&nbsp;**{w['ship_id']}** - alive "
+                f"`t={w['start_time_s']:.0f}s {w['end_time_s']:.0f}s`",
                 unsafe_allow_html=True,
             )
 
     if summary["events"]:
         st.markdown("**Event timeline**")
         for ev in summary["events"][:25]:
-            ships = " ↔ ".join(ev["ships"])
+            ships = " ".join(ev["ships"])
             st.markdown(
                 f"&nbsp;&nbsp;`t={ev['t']:>6.1f}s` "
-                f"{icon.get(ev['type'],'')} **{ev['type']}** — "
+                f"{icon.get(ev['type'],'')} **{ev['type']}** - "
                 f"{ships} · {ev['distance_m']:.0f} m apart "
                 f"(Δhdg {ev['hdg_diff']:.0f}°)",
                 unsafe_allow_html=True)
         if len(summary["events"]) > 25:
-            st.caption(f"… and {len(summary['events']) - 25} more events.")
+            st.caption(f"and {len(summary['events']) - 25} more events.")
     else:
         st.success("No close-quarters encounters detected.")
     st.markdown("---")
@@ -834,4 +847,4 @@ if st.session_state.get("encounter_summary"):
 # Footer
 # ---------------------------------------------------------------------------
 
-st.caption("Multi-ship trajectory simulation — MMG physics model.")
+st.caption("Multi-ship trajectory simulation - MMG physics model.")
