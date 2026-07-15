@@ -277,10 +277,8 @@ with st.sidebar:
     current_speed = st.slider("Current speed (m/s)", 0.0,   2.0,  0.7, 0.1)
     current_dir   = st.slider("Current from (°)",    0,    360,  200,  5)
 
-    use_live_wind = st.checkbox(
-        "Fetch live wind (OpenWeatherMap)", value=True,
-        help="Overrides the wind sliders above with real-time data for the simulation area."
-    )
+    # Live wind fetch removed per supervisor's note - use the sliders only.
+    use_live_wind = False
 
     st.markdown("---")
     map_style_folium = st.selectbox(
