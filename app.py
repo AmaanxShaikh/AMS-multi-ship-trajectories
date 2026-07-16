@@ -461,6 +461,11 @@ def _build_animation(result: dict, region: Region,
         end_s   = start_s + (len(traj) - 1)
         ship_meta.append({"start_s": start_s, "end_s": end_s})
 
+    def _marker_size(s: dict) -> int:
+        # scale marker size by ship length so bigger ships render bigger
+        length_m = float(s.get("length_m", 100.0))
+        return max(6, min(24, int(round(6 + length_m / 20))))
+
     for ship, meta in zip(ships, ship_meta):
         traj = ship.get("trajectory", [])
         if not traj or meta is None:
@@ -475,11 +480,11 @@ def _build_animation(result: dict, region: Region,
             lon=[], lat=[],
             mode="lines", line=dict(width=3, color=ship["color"]),
             name=f"{ship['ship_id']} trail"))
-        # Ship Position - empty until entry, then a red dot
+        # Ship Position - empty until entry, then a red dot sized by ship length
         fig.add_trace(go.Scattermap(
             lon=[], lat=[],
             mode="markers+text",
-            marker=dict(size=12, color="red"),
+            marker=dict(size=_marker_size(ship), color="red"),
             text=[ship["ship_id"]], textposition="top right",
             textfont=dict(size=10, color=ship["color"]),
             name=f"{ship['ship_id']} position"))
@@ -545,11 +550,11 @@ def _build_animation(result: dict, region: Region,
                 lon=[p["lon"] for p in trail], lat=[p["lat"] for p in trail],
                 mode="lines", line=dict(width=3, color=ship["color"])))
 
-            # Ship Position - red dot
+            # Ship Position - red dot sized by ship length
             fd.append(go.Scattermap(
                 lon=[cur["lon"]], lat=[cur["lat"]],
                 mode="markers+text",
-                marker=dict(size=12, color="red"),
+                marker=dict(size=_marker_size(ship), color="red"),
                 text=[label],
                 textposition="top right",
                 textfont=dict(size=9, color=ship["color"])))
