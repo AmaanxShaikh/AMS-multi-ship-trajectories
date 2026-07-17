@@ -139,59 +139,47 @@ def _clear_sim() -> None:
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.title("Simulation Controls")
+    st.title("Ship Simulator")
+    st.caption("Set up ships, pick a scenario, and run the simulation.")
 
+    # -----------------------------------------------------------------------
+    # Step 1 - Location
+    # -----------------------------------------------------------------------
+    st.markdown("### Step 1 - Where")
     region_options = available_regions()
     region_keys    = [k for k, _ in region_options]
     region_labels  = {k: name for k, name in region_options}
 
     location_style = st.selectbox(
-        "Choose Location", region_keys,
+        "Location", region_keys,
         format_func=lambda k: region_labels[k],
+        help="Pick which port area to simulate.",
     )
     region = load_region(location_style)
 
-    if st.button("Reset Points"):
-        for s in st.session_state["ships"]:
-            s["waypoints"] = []
-        st.session_state["last_clicked"] = None
-        st.session_state["trajectory_result"] = None
-        st.session_state["radar_result"] = None
-        _clear_sim()
-        st.rerun()
-
-    st.markdown("---")
-    st.subheader("Scenario")
-
+    # -----------------------------------------------------------------------
+    # Step 2 - Scenario type
+    # -----------------------------------------------------------------------
+    st.markdown("### Step 2 - Scenario")
     encounter_keys   = [k for k, _, _ in ENCOUNTER_TYPES]
     encounter_labels = {k: lbl for k, lbl, _ in ENCOUNTER_TYPES}
     encounter_help   = {k: hlp for k, _, hlp in ENCOUNTER_TYPES}
 
     encounter_type = st.selectbox(
-        "Encounter type", encounter_keys,
+        "Scenario type", encounter_keys,
         format_func=lambda k: encounter_labels[k],
+        help="Custom = you build the ships yourself. "
+             "Others give you a ready-made example you can then edit.",
     )
     st.caption(encounter_help[encounter_type])
 
-    scenario_name = st.text_input(
-        "Scenario name",
-        value=f"{region.display_name} - {encounter_labels[encounter_type]}",
-    )
-    scenario_duration_s = st.number_input(
-        "Scenario duration (s)", 60.0, 36000.0, 3600.0, 60.0,
-        help="Total scenario length on the shared clock. The encounter "
-             "analysis stops at this time and ignores any ship whose start "
-             "time is beyond it.",
-    )
-
     if encounter_type != "custom":
         if st.button(
-            f"Auto-Generate: {encounter_labels[encounter_type]}",
+            f"Load {encounter_labels[encounter_type]} example",
             use_container_width=True,
+            type="primary",
         ):
             raw_ships = build_scenario(encounter_type, location_style)
-            # Snap every auto-generated waypoint to the nearest point on the
-            # LOS centerline so ships always start/end on the actual river.
             for s in raw_ships:
                 s["waypoints"] = [
                     _snap_to_los(lat, lon, region)
@@ -204,15 +192,18 @@ with st.sidebar:
             _clear_sim()
             st.rerun()
 
-    st.markdown("---")
-    st.subheader("Ships")
+    # -----------------------------------------------------------------------
+    # Step 3 - Ships
+    # -----------------------------------------------------------------------
+    st.markdown("### Step 3 - Ships")
+    st.caption("Click on the map to place waypoints for the selected ship.")
 
     col_add, col_rm = st.columns(2)
-    if col_add.button("Add Ship", use_container_width=True):
+    if col_add.button("Add a ship", use_container_width=True):
         st.session_state["ships"].append(_new_ship_dict(len(st.session_state["ships"])))
         st.session_state["active_ship_idx"] = len(st.session_state["ships"]) - 1
 
-    if col_rm.button("Clear All", use_container_width=True):
+    if col_rm.button("Remove all", use_container_width=True):
         st.session_state["ships"] = []
         st.session_state["active_ship_idx"] = None
         st.session_state["trajectory_result"] = None
@@ -221,11 +212,11 @@ with st.sidebar:
         st.rerun()
 
     if not st.session_state["ships"]:
-        st.info("Use Auto-Generate or Add Ship to begin.")
+        st.info("No ships yet. Click 'Add a ship' or load an example above.")
     else:
         ship_labels = [s["ship_id"] for s in st.session_state["ships"]]
         active = st.selectbox(
-            "Active ship",
+            "Which ship am I placing waypoints for?",
             list(range(len(ship_labels))),
             index=st.session_state["active_ship_idx"] or 0,
             format_func=lambda i: ship_labels[i],
@@ -233,76 +224,100 @@ with st.sidebar:
         st.session_state["active_ship_idx"] = active
         s = st.session_state["ships"][active]
 
-        with st.expander(f"{s['ship_id']} parameters", expanded=False):
-            s["ship_id"] = st.text_input("Ship ID", s["ship_id"], key=f"id_{active}")
-            s["mmsi"]    = st.number_input("MMSI", 100_000_000, 999_999_999,
-                                           int(s["mmsi"]), 1, key=f"mmsi_{active}")
+        with st.expander(f"Edit {s['ship_id']}", expanded=False):
+            s["ship_id"] = st.text_input("Name", s["ship_id"], key=f"id_{active}")
+            s["mmsi"]    = st.number_input(
+                "MMSI (ship's radio ID)", 100_000_000, 999_999_999,
+                int(s["mmsi"]), 1, key=f"mmsi_{active}",
+            )
             c1, c2, c3 = st.columns(3)
             s["length_m"]  = c1.number_input("Length (m)", 5.0, 400.0, float(s["length_m"]),  1.0, key=f"len_{active}")
-            s["beam_m"]    = c2.number_input("Beam (m)",   2.0,  60.0, float(s["beam_m"]),    0.5, key=f"beam_{active}")
-            s["draught_m"] = c3.number_input("Draught (m)",0.5,  25.0, float(s["draught_m"]), 0.1, key=f"dr_{active}")
+            s["beam_m"]    = c2.number_input("Width (m)",  2.0,  60.0, float(s["beam_m"]),    0.5, key=f"beam_{active}")
+            s["draught_m"] = c3.number_input("Depth (m)",  0.5,  25.0, float(s["draught_m"]), 0.1,
+                                             key=f"dr_{active}", help="How deep the hull sits below the water.")
             c4, c5 = st.columns(2)
-            s["initial_speed_mps"]   = c4.number_input("Speed (m/s)",  0.0, 30.0,  float(s["initial_speed_mps"]),   0.1, key=f"sp_{active}")
-            s["initial_heading_deg"] = c5.number_input("Heading (°)",   0.0, 360.0, float(s["initial_heading_deg"]), 1.0, key=f"hd_{active}")
-            s["radar_rotation_s"]    = st.number_input("Radar period (s)", 1.0, 120.0, float(s["radar_rotation_s"]), 0.5, key=f"rad_{active}")
-            s["start_time_s"]        = st.number_input(
-                "Start time (s)", 0.0, 36000.0,
-                float(s.get("start_time_s", 0.0)), 10.0, key=f"start_{active}",
-                help="Seconds after t=0 when this ship enters the scene. "
-                     "Use this to stagger ships so paths that cross on the map "
-                     "are not flagged as encounters unless ships are actually "
-                     "present at the same time.",
+            s["initial_speed_mps"]   = c4.number_input(
+                "Speed (m/s)", 0.0, 30.0,
+                float(s["initial_speed_mps"]), 0.1, key=f"sp_{active}",
+                help="5 m/s is roughly 10 knots.",
             )
-            s["color"] = st.color_picker("Color", s["color"], key=f"col_{active}")
+            s["initial_heading_deg"] = c5.number_input(
+                "Facing (0-360)", 0.0, 360.0,
+                float(s["initial_heading_deg"]), 1.0, key=f"hd_{active}",
+                help="0 = North, 90 = East, 180 = South, 270 = West.",
+            )
+            s["start_time_s"] = st.number_input(
+                "Enters the scene after (seconds)",
+                0.0, 36000.0, float(s.get("start_time_s", 0.0)), 10.0,
+                key=f"start_{active}",
+                help="Leave at 0 for ships that are there from the start. "
+                     "Use higher values to stagger arrivals.",
+            )
+            s["radar_rotation_s"] = st.number_input(
+                "Radar rotation (seconds per turn)",
+                1.0, 120.0, float(s["radar_rotation_s"]), 0.5,
+                key=f"rad_{active}",
+            )
+            s["color"] = st.color_picker("Colour on the map", s["color"], key=f"col_{active}")
 
             cu, cc, cr = st.columns(3)
-            if cu.button("Undo",  key=f"undo_{active}", disabled=not s["waypoints"], use_container_width=True):
+            if cu.button("Undo last",  key=f"undo_{active}", disabled=not s["waypoints"], use_container_width=True):
                 s["waypoints"].pop(); st.rerun()
-            if cc.button("Clear",   key=f"clr_{active}",  disabled=not s["waypoints"], use_container_width=True):
+            if cc.button("Clear waypoints",   key=f"clr_{active}",  disabled=not s["waypoints"], use_container_width=True):
                 s["waypoints"] = []; st.rerun()
-            if cr.button("Remove",  key=f"rm_{active}",   use_container_width=True):
+            if cr.button("Delete ship",  key=f"rm_{active}",   use_container_width=True):
                 st.session_state["ships"].pop(active)
                 st.session_state["active_ship_idx"] = (
                     None if not st.session_state["ships"] else max(0, active - 1))
                 st.rerun()
 
     # -----------------------------------------------------------------------
-    # Environment (MMG physics inputs)
+    # Step 4 - Environment (collapsed by default)
     # -----------------------------------------------------------------------
-    st.markdown("---")
-    st.subheader("Environment")
-
-    wind_speed    = st.slider("Wind speed (m/s)",    0.0,  20.0,  0.0, 0.5)
-    wind_dir      = st.slider("Wind direction (°)",  0,    360,   0,   5)
-    current_speed = st.slider("Current speed (m/s)", 0.0,   2.0,  0.7, 0.1)
-    current_dir   = st.slider("Current from (°)",    0,    360,  200,  5)
-
+    with st.expander("Step 4 - Weather (optional)", expanded=False):
+        st.caption("Leave at defaults for calm conditions.")
+        wind_speed    = st.slider("Wind speed (m/s)",       0.0, 20.0, 0.0, 0.5,
+                                  help="0 = calm.")
+        wind_dir      = st.slider("Wind coming from (deg)", 0,   360,  0,   5,
+                                  help="0 = North, 90 = East.")
+        current_speed = st.slider("Current speed (m/s)",    0.0,  2.0, 0.7, 0.1)
+        current_dir   = st.slider("Current coming from (deg)", 0, 360, 200,  5)
     # Live wind fetch removed per supervisor's note - use the sliders only.
     use_live_wind = False
 
-    st.markdown("---")
-    map_style_folium = st.selectbox(
-        "Map Style", ["OpenStreetMap", "CartoDB positron", "CartoDB dark_matter"])
-    map_style_plotly = {
-        "OpenStreetMap":       "open-street-map",
-        "CartoDB positron":    "carto-positron",
-        "CartoDB dark_matter": "carto-darkmatter",
-    }.get(map_style_folium, "open-street-map")
+    # -----------------------------------------------------------------------
+    # Step 5 - Run
+    # -----------------------------------------------------------------------
+    st.markdown("### Step 5 - Run")
 
-    st.markdown("---")
-    scenario = _ui_to_scenario(scenario_name, location_style, encounter_type,
-                               scenario_duration_s)
-    st.download_button(
-        "Save Scenario (JSON)", data=scenario.to_json(),
-        file_name=f"{scenario_name.replace(' ','_').replace('-','-')}.json",
-        mime="application/json", use_container_width=True,
-        disabled=not st.session_state["ships"],
+    scenario_name = st.text_input(
+        "Scenario name",
+        value=f"{region.display_name} - {encounter_labels[encounter_type]}",
     )
 
-    st.markdown("---")
-    st.subheader("Run Simulation")
+    duration_presets = {
+        "15 minutes": 900.0,
+        "30 minutes": 1800.0,
+        "1 hour": 3600.0,
+        "2 hours": 7200.0,
+        "Custom (seconds)": None,
+    }
+    duration_choice = st.selectbox(
+        "How long should the scenario run for?",
+        list(duration_presets.keys()),
+        index=2,
+    )
+    if duration_presets[duration_choice] is None:
+        scenario_duration_s = st.number_input(
+            "Custom duration (seconds)", 60.0, 36000.0, 3600.0, 60.0,
+        )
+    else:
+        scenario_duration_s = duration_presets[duration_choice]
 
-    if st.button("Build Trajectories (MMG Physics)",
+    scenario = _ui_to_scenario(scenario_name, location_style, encounter_type,
+                               scenario_duration_s)
+
+    if st.button("Run simulation", type="primary",
                  disabled=not st.session_state["ships"],
                  use_container_width=True):
         missing = [s["ship_id"] for s in st.session_state["ships"]
@@ -357,6 +372,38 @@ with st.sidebar:
     if st.session_state.get("sim_running"):
         if st.button("Stop", use_container_width=True):
             _clear_sim(); st.rerun()
+
+    st.download_button(
+        "Save scenario as JSON",
+        data=scenario.to_json(),
+        file_name=f"{scenario_name.replace(' ','_').replace('-','-')}.json",
+        mime="application/json", use_container_width=True,
+        disabled=not st.session_state["ships"],
+    )
+
+    if st.button("Reset waypoints", use_container_width=True,
+                 disabled=not any(s["waypoints"] for s in st.session_state["ships"])):
+        for s in st.session_state["ships"]:
+            s["waypoints"] = []
+        st.session_state["last_clicked"] = None
+        st.session_state["trajectory_result"] = None
+        st.session_state["radar_result"] = None
+        _clear_sim()
+        st.rerun()
+
+    # -----------------------------------------------------------------------
+    # Advanced (collapsed by default)
+    # -----------------------------------------------------------------------
+    with st.expander("Advanced options", expanded=False):
+        map_style_folium = st.selectbox(
+            "Map style",
+            ["OpenStreetMap", "CartoDB positron", "CartoDB dark_matter"],
+        )
+    map_style_plotly = {
+        "OpenStreetMap":       "open-street-map",
+        "CartoDB positron":    "carto-positron",
+        "CartoDB dark_matter": "carto-darkmatter",
+    }.get(map_style_folium, "open-street-map")
 
 
 # ---------------------------------------------------------------------------
