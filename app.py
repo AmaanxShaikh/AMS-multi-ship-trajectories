@@ -423,19 +423,15 @@ st.markdown("""<style>
 # ---------------------------------------------------------------------------
 
 def _build_folium_map(region: Region, tiles: str) -> folium.Map:
+    # prefer_canvas=True uses canvas rendering instead of SVG - much faster
+    # when there are many markers/polygons, which reduces the click blink.
     fmap = folium.Map(location=list(region.center),
-                      zoom_start=region.default_zoom, tiles=tiles)
+                      zoom_start=region.default_zoom, tiles=tiles,
+                      prefer_canvas=True)
     if region.bbox:
         folium.Polygon(locations=region.bbox, color="#d7191c", weight=2,
                        fill=True, fill_color="#fdae61", fill_opacity=0.15,
                        tooltip="Working Area").add_to(fmap)
-    if region.river_corridor:
-        folium.Polygon(
-            locations=region.river_corridor,
-            color="#2b83ba", weight=2,
-            fill=True, fill_color="#abd9e9", fill_opacity=0.35,
-            tooltip=f"Navigable river corridor ({region.corridor_width_m:.0f} m)",
-        ).add_to(fmap)
     if region.los:
         folium.PolyLine(locations=region.los, color="#5bc8f5", weight=2,
                         dash_array="6,8", opacity=0.9,
@@ -447,21 +443,35 @@ def _build_folium_map(region: Region, tiles: str) -> folium.Map:
         if len(wps) >= 2:
             folium.PolyLine(locations=wps, color=ship["color"], weight=3,
                             opacity=0.8, tooltip=f"{ship['ship_id']} route").add_to(fmap)
+        last_idx = len(wps) - 1
         for j, (lat, lon) in enumerate(wps):
-            icon = folium.Icon(
-                color="green" if j == 0 else "red" if j == len(wps) - 1 and len(wps) > 1 else "blue",
-                icon="ship" if j == 0 else "flag-checkered" if j == len(wps) - 1 and len(wps) > 1 else "circle",
-                prefix="fa",
-            )
+            is_start = (j == 0)
+            is_end   = (j == last_idx and last_idx > 0)
             label = (f"{ship['ship_id']} - "
-                     + ("start" if j == 0
-                        else "end" if j == len(wps) - 1 and len(wps) > 1
+                     + ("start" if is_start
+                        else "end" if is_end
                         else f"wp {j+1}"))
-            folium.Marker(
-                location=(lat, lon),
-                popup=folium.Popup(f"{label}<br>{lat:.5f},{lon:.5f}", max_width=220),
-                icon=icon,
-            ).add_to(fmap)
+            if is_start or is_end:
+                # keep the recognisable start/end pins
+                icon = folium.Icon(
+                    color="green" if is_start else "red",
+                    icon="ship" if is_start else "flag-checkered",
+                    prefix="fa",
+                )
+                folium.Marker(
+                    location=(lat, lon),
+                    popup=folium.Popup(f"{label}<br>{lat:.5f},{lon:.5f}", max_width=220),
+                    icon=icon,
+                ).add_to(fmap)
+            else:
+                # intermediate waypoints as lightweight canvas circles
+                folium.CircleMarker(
+                    location=(lat, lon),
+                    radius=5,
+                    color=ship["color"], weight=2,
+                    fill=True, fill_color=ship["color"], fill_opacity=0.9,
+                    tooltip=label,
+                ).add_to(fmap)
     return fmap
 
 
@@ -716,7 +726,13 @@ col1, col2 = st.columns([4, 1])
 with col1:
     st.subheader("1. Select Points on Map")
     fmap     = _build_folium_map(region, map_style_folium)
-    map_data = st_folium(fmap, width=900, height=500, returned_objects=["last_clicked"])
+    # Stable key lets Streamlit reuse the map iframe across reruns instead of
+    # tearing it down; returned_objects limits payload back to Python.
+    map_data = st_folium(
+        fmap, width=900, height=500,
+        returned_objects=["last_clicked"],
+        key="scenario_map",
+    )
 
     if not st.session_state.get("sim_running"):
         if map_data and map_data.get("last_clicked"):
