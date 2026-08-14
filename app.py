@@ -552,6 +552,7 @@ def _build_animation(result: dict, region: Region,
 
     t  = timeline_start
     fi = 0
+    frame_times: list[float] = []
     while t <= timeline_end + 1e-6:
         fd = []
 
@@ -607,15 +608,45 @@ def _build_animation(result: dict, region: Region,
                 textfont=dict(size=9, color=ship["color"])))
 
         frames.append(go.Frame(data=fd, name=f"f{fi}"))
+        frame_times.append(t)
         t  += step
         fi += 1
 
     fig.frames = frames
+
+    # Scrubber: one step per frame, labelled by time in seconds.
+    slider_steps = [
+        dict(
+            method="animate",
+            args=[
+                [f"f{i}"],
+                dict(mode="immediate",
+                     frame=dict(duration=0, redraw=True),
+                     transition=dict(duration=0)),
+            ],
+            label=f"{ft:.0f}",
+        )
+        for i, ft in enumerate(frame_times)
+    ]
+    scrubber = dict(
+        active=0,
+        currentvalue=dict(prefix="Time: ", suffix=" s",
+                          visible=True, xanchor="left",
+                          font=dict(size=12, color="#333")),
+        pad=dict(t=40, b=10, l=10, r=10),
+        len=0.9, x=0.05, y=-0.02,
+        steps=slider_steps,
+    )
+
+    # Backward playback: build frame names in reverse.
+    reverse_frames = [f"f{i}" for i in range(len(frames) - 1, -1, -1)]
+
     fig.update_layout(
-        height=540,
+        height=560,
         map=dict(style=map_style,
                  center=dict(lat=region.center[0], lon=region.center[1]),
                  zoom=region.default_zoom - 1),
+        sliders=[scrubber],
         updatemenus=[dict(
             type="buttons", showactive=True, direction="left",
             x=0.1, xanchor="right", y=1.08, yanchor="top",
@@ -625,7 +656,12 @@ def _build_animation(result: dict, region: Region,
                 dict(label="Play", method="animate",
                      args=[None, {"frame": {"duration": speed_ms, "redraw": True},
                                   "fromcurrent": True, "mode": "immediate"}]),
-                dict(label="Stop", method="animate",
+                dict(label="Play reverse", method="animate",
+                     args=[reverse_frames,
+                           {"frame": {"duration": speed_ms, "redraw": True},
+                            "mode": "immediate",
+                            "transition": {"duration": 0}}]),
+                dict(label="Pause", method="animate",
                      args=[[None], {"frame": {"duration": 0, "redraw": False},
                                     "mode": "immediate",
                                     "transition": {"duration": 0}}]),
@@ -636,7 +672,7 @@ def _build_animation(result: dict, region: Region,
             ],
         )],
         legend=dict(font=dict(size=11)),
-        margin={"r": 0, "t": 60, "l": 0, "b": 0},
+        margin={"r": 0, "t": 60, "l": 0, "b": 40},
     )
     return fig
 
