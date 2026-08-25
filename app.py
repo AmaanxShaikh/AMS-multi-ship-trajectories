@@ -450,8 +450,11 @@ st.markdown("""<style>
 # ---------------------------------------------------------------------------
 
 def _build_folium_map(region: Region, tiles: str, show_sensors: bool = True) -> folium.Map:
+    # prefer_canvas=True uses canvas rendering instead of SVG - much faster
+    # when there are many markers/polygons, which reduces the click blink.
     fmap = folium.Map(location=list(region.center),
-                      zoom_start=region.default_zoom, tiles=tiles)
+                      zoom_start=region.default_zoom, tiles=tiles,
+                      prefer_canvas=True)
     if show_sensors:
         for sensor in default_sensor_layout(region):
             folium.CircleMarker(
@@ -469,17 +472,11 @@ def _build_folium_map(region: Region, tiles: str, show_sensors: bool = True) -> 
                     font-weight:bold;transform:translate(10px,-6px);">
                     {sensor.sensor_id}</div>"""),
             ).add_to(fmap)
+
     if region.bbox:
         folium.Polygon(locations=region.bbox, color="#d7191c", weight=2,
                        fill=True, fill_color="#fdae61", fill_opacity=0.15,
                        tooltip="Working Area").add_to(fmap)
-    if region.river_corridor:
-        folium.Polygon(
-            locations=region.river_corridor,
-            color="#2b83ba", weight=2,
-            fill=True, fill_color="#abd9e9", fill_opacity=0.35,
-            tooltip=f"Navigable river corridor ({region.corridor_width_m:.0f} m)",
-        ).add_to(fmap)
     if region.los:
         folium.PolyLine(locations=region.los, color="#5bc8f5", weight=2,
                         dash_array="6,8", opacity=0.9,
@@ -491,21 +488,35 @@ def _build_folium_map(region: Region, tiles: str, show_sensors: bool = True) -> 
         if len(wps) >= 2:
             folium.PolyLine(locations=wps, color=ship["color"], weight=3,
                             opacity=0.8, tooltip=f"{ship['ship_id']} route").add_to(fmap)
+        last_idx = len(wps) - 1
         for j, (lat, lon) in enumerate(wps):
-            icon = folium.Icon(
-                color="green" if j == 0 else "red" if j == len(wps) - 1 and len(wps) > 1 else "blue",
-                icon="ship" if j == 0 else "flag-checkered" if j == len(wps) - 1 and len(wps) > 1 else "circle",
-                prefix="fa",
-            )
+            is_start = (j == 0)
+            is_end   = (j == last_idx and last_idx > 0)
             label = (f"{ship['ship_id']} - "
-                     + ("start" if j == 0
-                        else "end" if j == len(wps) - 1 and len(wps) > 1
+                     + ("start" if is_start
+                        else "end" if is_end
                         else f"wp {j+1}"))
-            folium.Marker(
-                location=(lat, lon),
-                popup=folium.Popup(f"{label}<br>{lat:.5f},{lon:.5f}", max_width=220),
-                icon=icon,
-            ).add_to(fmap)
+            if is_start or is_end:
+                # keep the recognisable start/end pins
+                icon = folium.Icon(
+                    color="green" if is_start else "red",
+                    icon="ship" if is_start else "flag-checkered",
+                    prefix="fa",
+                )
+                folium.Marker(
+                    location=(lat, lon),
+                    popup=folium.Popup(f"{label}<br>{lat:.5f},{lon:.5f}", max_width=220),
+                    icon=icon,
+                ).add_to(fmap)
+            else:
+                # intermediate waypoints as lightweight canvas circles
+                folium.CircleMarker(
+                    location=(lat, lon),
+                    radius=5,
+                    color=ship["color"], weight=2,
+                    fill=True, fill_color=ship["color"], fill_opacity=0.9,
+                    tooltip=label,
+                ).add_to(fmap)
     return fmap
 
 
@@ -596,6 +607,7 @@ def _build_animation(result: dict, region: Region,
 
     t  = timeline_start
     fi = 0
+    frame_times: list[float] = []
     while t <= timeline_end + 1e-6:
         fd = []
 
@@ -651,15 +663,45 @@ def _build_animation(result: dict, region: Region,
                 textfont=dict(size=9, color=ship["color"])))
 
         frames.append(go.Frame(data=fd, name=f"f{fi}"))
+        frame_times.append(t)
         t  += step
         fi += 1
 
     fig.frames = frames
+
+    # Scrubber: one step per frame, labelled by time in seconds.
+    slider_steps = [
+        dict(
+            method="animate",
+            args=[
+                [f"f{i}"],
+                dict(mode="immediate",
+                     frame=dict(duration=0, redraw=True),
+                     transition=dict(duration=0)),
+            ],
+            label=f"{ft:.0f}",
+        )
+        for i, ft in enumerate(frame_times)
+    ]
+    scrubber = dict(
+        active=0,
+        currentvalue=dict(prefix="Time: ", suffix=" s",
+                          visible=True, xanchor="left",
+                          font=dict(size=12, color="#333")),
+        pad=dict(t=40, b=10, l=10, r=10),
+        len=0.9, x=0.05, y=-0.02,
+        steps=slider_steps,
+    )
+
+    # Backward playback: build frame names in reverse.
+    reverse_frames = [f"f{i}" for i in range(len(frames) - 1, -1, -1)]
+
     fig.update_layout(
-        height=540,
+        height=560,
         map=dict(style=map_style,
                  center=dict(lat=region.center[0], lon=region.center[1]),
                  zoom=region.default_zoom - 1),
+        sliders=[scrubber],
         updatemenus=[dict(
             type="buttons", showactive=True, direction="left",
             x=0.1, xanchor="right", y=1.08, yanchor="top",
@@ -669,7 +711,12 @@ def _build_animation(result: dict, region: Region,
                 dict(label="Play", method="animate",
                      args=[None, {"frame": {"duration": speed_ms, "redraw": True},
                                   "fromcurrent": True, "mode": "immediate"}]),
-                dict(label="Stop", method="animate",
+                dict(label="Play reverse", method="animate",
+                     args=[reverse_frames,
+                           {"frame": {"duration": speed_ms, "redraw": True},
+                            "mode": "immediate",
+                            "transition": {"duration": 0}}]),
+                dict(label="Pause", method="animate",
                      args=[[None], {"frame": {"duration": 0, "redraw": False},
                                     "mode": "immediate",
                                     "transition": {"duration": 0}}]),
@@ -680,7 +727,7 @@ def _build_animation(result: dict, region: Region,
             ],
         )],
         legend=dict(font=dict(size=11)),
-        margin={"r": 0, "t": 60, "l": 0, "b": 0},
+        margin={"r": 0, "t": 60, "l": 0, "b": 40},
     )
     return fig
 
@@ -724,7 +771,13 @@ col1, col2 = st.columns([4, 1])
 with col1:
     st.subheader("1. Select Points on Map")
     fmap     = _build_folium_map(region, map_style_folium, show_sensors)
-    map_data = st_folium(fmap, width=900, height=500, returned_objects=["last_clicked"])
+    # Stable key lets Streamlit reuse the map iframe across reruns instead of
+    # tearing it down; returned_objects limits payload back to Python.
+    map_data = st_folium(
+        fmap, width=900, height=500,
+        returned_objects=["last_clicked"],
+        key="scenario_map",
+    )
 
     if not st.session_state.get("sim_running"):
         if map_data and map_data.get("last_clicked"):
