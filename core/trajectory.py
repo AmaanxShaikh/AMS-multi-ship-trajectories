@@ -219,6 +219,49 @@ def build_trajectories(
 
 
 # ---------------------------------------------------------------------------
+# Exact position at an arbitrary (fractional) time
+# ---------------------------------------------------------------------------
+
+def position_at_time(traj: ShipTrajectory, t: float) -> TrajectoryPoint:
+    """Return the ship's exact position/heading/speed at time `t`.
+
+    `traj.points` only holds whole-second samples (t=0, 1, 2, ...). This
+    linearly interpolates between the two samples surrounding `t` (e.g.
+    t=2.33 sits between the t=2 and t=3 points). Consecutive samples are at
+    most `dt` seconds and at most a few metres apart, so straight-line
+    interpolation of lat/lon is accurate enough here.
+
+    `t` before the first point or after the last point clamps to the
+    nearest end.
+    """
+    pts = traj.points
+    if not pts:
+        raise ValueError(f"Trajectory for {traj.ship_id} has no points")
+
+    if t <= pts[0].t:
+        return pts[0]
+    if t >= pts[-1].t:
+        return pts[-1]
+
+    # Find the two samples bracketing t (linear scan — trajectories are
+    # short enough that this is not a bottleneck).
+    for p0, p1 in zip(pts, pts[1:]):
+        if p0.t <= t <= p1.t:
+            span = p1.t - p0.t
+            frac = 0.0 if span <= 0 else (t - p0.t) / span
+            return TrajectoryPoint(
+                t=t,
+                lat=p0.lat + frac * (p1.lat - p0.lat),
+                lon=p0.lon + frac * (p1.lon - p0.lon),
+                heading=p0.heading,
+                speed_mps=p0.speed_mps,
+            )
+
+    # Should be unreachable given the clamp checks above.
+    return pts[-1]
+
+
+# ---------------------------------------------------------------------------
 # Position-update generator (for live Streamlit simulation)
 # ---------------------------------------------------------------------------
 

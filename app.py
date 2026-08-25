@@ -19,6 +19,8 @@ from core.scenario import ENCOUNTER_TYPES, Scenario, Ship, Waypoint, next_color
 from core.scenario_builder import build_scenario
 from core.physics import scenario_with_physics, EnvParams
 from core.simulation_manager import SimulationManager
+from core.sensors import default_sensor_layout
+from core.passive_radar import simulate_passive_detections, trajectory_from_dict
 
 st.set_page_config(layout="wide", page_title="Multi-Ship Trajectory Simulation")
 
@@ -35,6 +37,7 @@ def _init_state() -> None:
     st.session_state.setdefault("radar_result", None)
     st.session_state.setdefault("encounter_summary", None)
     st.session_state.setdefault("sim_running", False)
+    st.session_state.setdefault("passive_result", None)
 
 _init_state()
 
@@ -189,6 +192,7 @@ with st.sidebar:
             st.session_state["active_ship_idx"] = 0 if raw_ships else None
             st.session_state["trajectory_result"] = None
             st.session_state["radar_result"] = None
+            st.session_state["passive_result"] = None
             _clear_sim()
             st.rerun()
 
@@ -208,6 +212,7 @@ with st.sidebar:
         st.session_state["active_ship_idx"] = None
         st.session_state["trajectory_result"] = None
         st.session_state["radar_result"] = None
+        st.session_state["passive_result"] = None
         _clear_sim()
         st.rerun()
 
@@ -364,6 +369,21 @@ with st.sidebar:
                     pass
                 st.session_state["encounter_summary"] = mgr.summary()
 
+            with st.spinner("Simulating passive sensor detections"):
+                sensors = default_sensor_layout(region)
+                passive_trajs = [
+                    trajectory_from_dict(s) for s in result["ships"]
+                    if s.get("trajectory")
+                ]
+                rotation_periods = {
+                    s["ship_id"]: float(s.get("radar_rotation_s", 6.0))
+                    for s in result["ships"]
+                }
+                st.session_state["passive_result"] = simulate_passive_detections(
+                    passive_trajs, sensors, rotation_periods,
+                    noise_sigma_s=0.001,
+                )
+
             st.session_state["trajectory_result"] = result
             st.session_state["radar_result"]      = result
             _clear_sim()
@@ -388,6 +408,7 @@ with st.sidebar:
         st.session_state["last_clicked"] = None
         st.session_state["trajectory_result"] = None
         st.session_state["radar_result"] = None
+        st.session_state["passive_result"] = None
         _clear_sim()
         st.rerun()
 
@@ -398,6 +419,12 @@ with st.sidebar:
         map_style_folium = st.selectbox(
             "Map style",
             ["OpenStreetMap", "CartoDB positron", "CartoDB dark_matter"],
+        )
+        show_sensors = st.checkbox(
+            "Show passive sensors on map", value=True,
+            help="Fixed shore sensors used for the passive radar-timestamp "
+                 "task (see docs/radar_research.md). Auto-placed near the "
+                 "coastline for the selected region -- not user-placed yet.",
         )
     map_style_plotly = {
         "OpenStreetMap":       "open-street-map",
@@ -422,9 +449,26 @@ st.markdown("""<style>
 # Folium map
 # ---------------------------------------------------------------------------
 
-def _build_folium_map(region: Region, tiles: str) -> folium.Map:
+def _build_folium_map(region: Region, tiles: str, show_sensors: bool = True) -> folium.Map:
     fmap = folium.Map(location=list(region.center),
                       zoom_start=region.default_zoom, tiles=tiles)
+    if show_sensors:
+        for sensor in default_sensor_layout(region):
+            folium.CircleMarker(
+                location=(sensor.lat, sensor.lon),
+                radius=8, color="#000000", weight=2,
+                fill=True, fill_color="#ffcc00", fill_opacity=1.0,
+                tooltip=f"Passive sensor {sensor.sensor_id}",
+                popup=folium.Popup(
+                    f"{sensor.sensor_id}<br>{sensor.lat:.5f}, {sensor.lon:.5f}",
+                    max_width=200),
+            ).add_to(fmap)
+            folium.map.Marker(
+                location=(sensor.lat, sensor.lon),
+                icon=folium.DivIcon(html=f"""<div style="font-size:11px;
+                    font-weight:bold;transform:translate(10px,-6px);">
+                    {sensor.sensor_id}</div>"""),
+            ).add_to(fmap)
     if region.bbox:
         folium.Polygon(locations=region.bbox, color="#d7191c", weight=2,
                        fill=True, fill_color="#fdae61", fill_opacity=0.15,
@@ -679,7 +723,7 @@ col1, col2 = st.columns([4, 1])
 
 with col1:
     st.subheader("1. Select Points on Map")
-    fmap     = _build_folium_map(region, map_style_folium)
+    fmap     = _build_folium_map(region, map_style_folium, show_sensors)
     map_data = st_folium(fmap, width=900, height=500, returned_objects=["last_clicked"])
 
     if not st.session_state.get("sim_running"):
@@ -904,6 +948,68 @@ if st.session_state.get("encounter_summary"):
             st.caption(f"and {len(summary['events']) - 25} more events.")
     else:
         st.success("No close-quarters encounters detected.")
+    st.markdown("---")
+
+
+# ---------------------------------------------------------------------------
+# Section 6 - Passive sensor detections (SeaSentry-style timestamps)
+# ---------------------------------------------------------------------------
+
+if st.session_state.get("passive_result"):
+    passive = st.session_state["passive_result"]
+    st.subheader("6. Passive Sensor Detections")
+    st.caption(
+        "Simulated timestamps of when each ship's radar beam sweeps past "
+        "each fixed shore sensor. No angle is "
+        "recorded, only timing - same as a real passive sensor."
+    )
+
+    n_sensors = len(passive["sensors"])
+    n_dets    = len(passive["detections"])
+    ships_seen = sorted({d["ship_id"] for d in passive["detections"]})
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Sensors", n_sensors)
+    m2.metric("Detections", n_dets)
+    m3.metric("Ships detected", len(ships_seen))
+
+    with st.expander("Sensor positions", expanded=False):
+        st.dataframe(passive["sensors"], use_container_width=True)
+
+    with st.expander("Detections per ship / sensor", expanded=False):
+        from collections import Counter
+        counts = Counter((d["ship_id"], d["sensor_id"]) for d in passive["detections"])
+        st.dataframe(
+            [{"ship_id": sid, "sensor_id": sen, "detections": n}
+             for (sid, sen), n in sorted(counts.items())],
+            use_container_width=True,
+        )
+
+    with st.expander("Preview detections (first 50)", expanded=False):
+        st.dataframe(passive["detections"][:50], use_container_width=True)
+
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            "Download detections as JSON",
+            data=json.dumps(passive, indent=2),
+            file_name="passive_detections.json",
+            mime="application/json", use_container_width=True,
+        )
+    with col_dl2:
+        import io
+        import csv as _csv
+        buf = io.StringIO()
+        writer = _csv.DictWriter(
+            buf, fieldnames=["ship_id", "sensor_id", "sweep", "true_t", "measured_t"])
+        writer.writeheader()
+        writer.writerows(passive["detections"])
+        st.download_button(
+            "Download detections as CSV",
+            data=buf.getvalue(),
+            file_name="passive_detections.csv",
+            mime="text/csv", use_container_width=True,
+        )
     st.markdown("---")
 
 
