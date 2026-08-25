@@ -523,11 +523,17 @@ def _build_animation(result: dict, region: Region,
         length_m = float(s.get("length_m", 100.0))
         return max(6, min(24, int(round(6 + length_m / 20))))
 
-    for ship, meta in zip(ships, ship_meta):
-        traj = ship.get("trajectory", [])
-        if not traj or meta is None:
-            continue
-        # Ship Path - solid line, faint ghost
+    # Only animate ships that actually have a trajectory; keeps the frame
+    # trace indexing simple and skips dead weight.
+    active = [(s, m) for s, m in zip(ships, ship_meta)
+              if s.get("trajectory") and m is not None]
+
+    base_idx = 1 if region.los else 0   # LOS occupies trace 0 when present
+    moving_indices: list[int] = []
+
+    for k, (ship, meta) in enumerate(active):
+        traj = ship["trajectory"]
+        # Ship Path - solid line, faint ghost (static, drawn once)
         fig.add_trace(go.Scattermap(
             lon=[p["lon"] for p in traj], lat=[p["lat"] for p in traj],
             mode="lines", line=dict(width=2, color=ship["color"]),
@@ -545,6 +551,9 @@ def _build_animation(result: dict, region: Region,
             text=[ship["ship_id"]], textposition="top right",
             textfont=dict(size=10, color=ship["color"]),
             name=f"{ship['ship_id']} position"))
+        # trail and position are the per-frame moving traces (ghost is not)
+        moving_indices += [base_idx + 3 * k + 1,
+                           base_idx + 3 * k + 2]
 
     # Animation timeline: cover the whole scenario, not just the longest traj.
     scenario_end = max(
@@ -556,39 +565,27 @@ def _build_animation(result: dict, region: Region,
         timeline_end = min(timeline_end, float(window_end_s))
     timeline_start = max(0.0, float(window_start_s))
 
+    # Frame step: at least the radar period, but never more than ~150 frames
+    # total - keeps the figure light so the page loads fast even for a
+    # full-hour scenario.
     radar_s = ships[0].get("radar_rotation_s", 6.0) if ships else 6.0
-    step    = max(1.0, float(radar_s))                 # seconds per frame
+    span    = max(1.0, timeline_end - timeline_start)
+    step    = max(1.0, float(radar_s), span / 150.0)   # seconds per frame
     frames  = []
 
     t  = timeline_start
     fi = 0
     frame_times: list[float] = []
     while t <= timeline_end + 1e-6:
+        # Each frame only carries the moving traces (trail + position per
+        # ship); the map tiles, LOS, and path ghosts stay untouched between
+        # frames, which removes most of the redraw cost and flicker.
         fd = []
 
-        # LOS in every frame - dotted light blue
-        if region.los:
-            fd.append(go.Scattermap(
-                lon=[p[1] for p in region.los], lat=[p[0] for p in region.los],
-                mode="lines+markers",
-                line=dict(width=2, color="#5bc8f5"),
-                marker=dict(size=4, color="#5bc8f5"),
-                opacity=0.9))
-
-        for ship, meta in zip(ships, ship_meta):
-            traj = ship.get("trajectory", [])
-
-            # Ship Path ghost - solid, faint (always visible for context)
-            fd.append(go.Scattermap(
-                lon=[p["lon"] for p in traj], lat=[p["lat"] for p in traj],
-                mode="lines", line=dict(width=2, color=ship["color"]), opacity=0.15))
-
-            if not traj or meta is None:
-                fd.append(go.Scattermap(lon=[], lat=[], mode="lines"))
-                fd.append(go.Scattermap(lon=[], lat=[], mode="markers"))
-                continue
-
+        for ship, meta in active:
+            traj = ship["trajectory"]
             local_t = t - meta["start_s"]
+
             if local_t < 0:
                 # Ship has not entered the scene yet - hide it.
                 fd.append(go.Scattermap(lon=[], lat=[], mode="lines"))
@@ -598,10 +595,7 @@ def _build_animation(result: dict, region: Region,
             idx   = min(int(round(local_t)), len(traj) - 1)
             trail = traj[max(0, idx - 40): idx + 1]
             cur   = traj[idx]
-            done  = t > meta["end_s"]
-            label = (f"{ship['ship_id']} t={t:.0f}s "
-                     f"{cur['heading']:.0f}°"
-                     + ("" if done else ""))
+            label = f"{ship['ship_id']} t={t:.0f}s {cur['heading']:.0f}°"
 
             # Animated trail - solid ship color
             fd.append(go.Scattermap(
@@ -617,7 +611,8 @@ def _build_animation(result: dict, region: Region,
                 textposition="top right",
                 textfont=dict(size=9, color=ship["color"])))
 
-        frames.append(go.Frame(data=fd, name=f"f{fi}"))
+        frames.append(go.Frame(data=fd, name=f"f{fi}",
+                               traces=moving_indices))
         frame_times.append(t)
         t  += step
         fi += 1
