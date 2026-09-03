@@ -95,11 +95,16 @@ def _push_onto_land(
 # because the automatic snap-to-coastline landed somewhere worse than a
 # simpler placement already was.
 _OVERRIDES: Dict[Tuple[str, str], Tuple[float, float]] = {
-    ("cuxhaven", "S2"): (53.80306331513907, 9.387116301293418),  # original SE bbox corner
-    # ("rheinhafen", "S1"): (48.97935233, 8.26078500),
+    ("cuxhaven", "S2"): (53.80306331513907, 9.387116301293418),  #testing
+    ("rheinhafen", "S1"): (48.97935233, 8.26078500),
+    ("rheinhafen", "S4"): (48.97821117, 8.25341433),
+    ("rheinhafen", "S3"): (48.98098500, 8.25861500),
+    ("rheinhafen", "S2"): (48.97646668, 8.25545553),  
+
+    # ("rheinhafen", "S1"): (48.98042417, 8.26287883),
     # ("rheinhafen", "S4"): (48.97821117, 8.25341433),
-    # ("rheinhafen", "S3"): (48.98098500, 8.25861500),
-    # ("rheinhafen", "S2"): (48.97646668, 8.25545553),    
+    # ("rheinhafen", "S3"): (48.98209750, 8.26070817),
+    # ("rheinhafen", "S2"): (48.97646683, 8.255455533),    
 }
 
 
