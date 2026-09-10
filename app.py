@@ -346,6 +346,7 @@ with st.sidebar:
                     env_params    = ep,
                     dt            = 1.0,
                     use_live_wind = use_live_wind,
+                    duration_s    = float(scenario_duration_s),
                 )
                 # Forward per-ship timing onto the physics output (the
                 # physics layer ignores it; the SimulationManager reads it).
