@@ -339,12 +339,17 @@ with st.sidebar:
                 current_dir_deg   = float(current_dir),
             )
 
+            # Single source of truth for the simulation time step. Physics
+            # and the encounter-analysis pass below must agree on this, or
+            # they'll silently walk the trajectory at different resolutions.
+            sim_dt = 1.0
+
             with st.spinner("Running MMG physics simulation"):
                 scen_dict = scenario.to_dict()
                 result    = scenario_with_physics(
                     scen_dict,
                     env_params    = ep,
-                    dt            = 1.0,
+                    dt            = sim_dt,
                     use_live_wind = use_live_wind,
                     duration_s    = float(scenario_duration_s),
                 )
@@ -363,7 +368,7 @@ with st.sidebar:
 
             with st.spinner("Running encounter analysis"):
                 mgr = SimulationManager(
-                    result, dt=1.0,
+                    result, dt=sim_dt,
                     max_duration_s=float(scenario_duration_s),
                 )
                 for _ in mgr.run():
