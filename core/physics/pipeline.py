@@ -179,6 +179,7 @@ def build_trajectory_physics(
     dt:          float = 1.0,
     use_live_wind: bool = True,
     duration_s:  float = 20_000.0,
+    wind_refresh_s: float = 300.0,
 ) -> ShipTrajectory:
     """Run the full MMG simulation for one ship and return a ShipTrajectory.
 
@@ -195,6 +196,8 @@ def build_trajectory_physics(
                             this much simulated time (default 20,000s ~= 5.5h,
                             matching the previous hardcoded 20,000-step cap
                             at dt=1.0)
+    wind_refresh_s       : how often (in simulated seconds) to re-fetch live
+                            wind while the ship is moving (default 300s = 5min)
     """
     if len(waypoints) < 2:
         return ShipTrajectory(ship_id=ship_id, mmsi=mmsi, color=color, points=[])
@@ -239,14 +242,15 @@ def build_trajectory_physics(
     ref_idx = 1
     current_ref = simulation_path[ref_idx]
     max_steps   = max(1, int(duration_s / dt))
+    wind_refresh_steps = max(1, int(wind_refresh_s / dt))
     t           = 0.0
 
     for step_i in range(1, max_steps + 1):
         t += dt
         elapsed = step_i * dt
 
-        # Refresh live wind every 5 minutes
-        if use_live_wind and step_i % 300 == 0:
+        # Refresh live wind every wind_refresh_s simulated seconds
+        if use_live_wind and step_i % wind_refresh_steps == 0:
             ws, wd = _fetch_wind(state.lat, state.lon)
             env_params.wind_speed_mps = ws
             env_params.wind_dir_deg   = wd
@@ -308,6 +312,7 @@ def scenario_with_physics(
     dt:            float = 1.0,
     use_live_wind: bool  = True,
     duration_s:    float = 20_000.0,
+    wind_refresh_s: float = 300.0,
 ) -> dict:
     """Run MMG physics for all ships and return augmented scenario dict.
 
@@ -315,8 +320,10 @@ def scenario_with_physics(
     Each ship gets its own independent ShipParams and _ShipState so they
     don't interfere with each other.
 
-    duration_s : give up on a ship that hasn't reached its goal within this
-                 much simulated time (default 20,000s ~= 5.5h).
+    duration_s     : give up on a ship that hasn't reached its goal within
+                      this much simulated time (default 20,000s ~= 5.5h).
+    wind_refresh_s : how often (in simulated seconds) to re-fetch live wind
+                      per ship (default 300s = 5min).
     """
     if env_params is None:
         env_params = EnvParams()
@@ -357,6 +364,7 @@ def scenario_with_physics(
             dt          = dt,
             use_live_wind = use_live_wind,
             duration_s  = duration_s,
+            wind_refresh_s = wind_refresh_s,
         )
 
         ship_dict["trajectory"] = [asdict(p) for p in traj.points]
