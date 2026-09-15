@@ -137,6 +137,64 @@ def _clear_sim() -> None:
     st.session_state["sim_running"] = False
 
 
+# Keyed per-ship widgets hold their own state and ignore new default values,
+# so these have to be cleared whenever the ship list is replaced wholesale.
+_SHIP_WIDGET_PREFIXES = ("id_", "mmsi_", "len_", "beam_", "dr_", "sp_",
+                         "hd_", "start_", "rad_", "col_")
+
+_DURATION_PRESETS = {
+    "15 minutes": 900.0,
+    "30 minutes": 1800.0,
+    "1 hour": 3600.0,
+    "2 hours": 7200.0,
+    "Custom (seconds)": None,
+}
+
+
+def _parse_scenario_json(data: dict) -> dict:
+    """Turn a saved scenario (or full result) JSON into session-state values.
+
+    Accepts both the sidebar "Save scenario" file and the Section 2 full
+    result download - only the ship configuration fields are read.
+    Raises ValueError with a readable message on anything malformed.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("ships"), list):
+        raise ValueError("file has no 'ships' list")
+
+    ships = []
+    for i, raw in enumerate(data["ships"]):
+        s = _new_ship_dict(i)
+        try:
+            for key in ("ship_id", "color"):
+                if key in raw:
+                    s[key] = str(raw[key])
+            if "mmsi" in raw:
+                s["mmsi"] = int(raw["mmsi"])
+            for key in ("length_m", "beam_m", "draught_m", "initial_speed_mps",
+                        "initial_heading_deg", "radar_rotation_s", "start_time_s"):
+                if key in raw:
+                    s[key] = float(raw[key])
+            wps = []
+            for wp in raw.get("waypoints", []):
+                if isinstance(wp, dict):
+                    wps.append((float(wp["lat"]), float(wp["lon"])))
+                else:
+                    wps.append((float(wp[0]), float(wp[1])))
+            s["waypoints"] = wps
+        except (KeyError, TypeError, ValueError, IndexError):
+            raise ValueError(f"ship {i + 1} has an invalid field")
+        # color_picker only accepts #RRGGBB
+        if not (s["color"].startswith("#") and len(s["color"]) == 7):
+            s["color"] = next_color(i)
+        ships.append(s)
+
+    return {
+        "region":     data.get("region"),
+        "duration_s": data.get("duration_s"),
+        "ships":      ships,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -153,10 +211,42 @@ with st.sidebar:
     region_keys    = [k for k, _ in region_options]
     region_labels  = {k: name for k, name in region_options}
 
+    # Apply a scenario loaded from JSON on the previous run. This has to
+    # happen before the widgets below are created, since Streamlit only lets
+    # you set a keyed widget's value before it renders.
+    pending = st.session_state.pop("pending_load", None)
+    if pending:
+        if pending["region"] in region_keys:
+            st.session_state["location"] = pending["region"]
+        else:
+            st.warning(f"Unknown region '{pending['region']}' in file, "
+                       "keeping the current location.")
+        dur = pending["duration_s"]
+        if dur is not None:
+            label = next((k for k, v in _DURATION_PRESETS.items()
+                          if v is not None and v == float(dur)), None)
+            if label:
+                st.session_state["duration_choice"] = label
+            else:
+                st.session_state["duration_choice"] = "Custom (seconds)"
+                st.session_state["custom_duration"] = min(max(float(dur), 60.0), 36000.0)
+        for k in list(st.session_state.keys()):
+            if isinstance(k, str) and k.startswith(_SHIP_WIDGET_PREFIXES):
+                del st.session_state[k]
+        st.session_state["ships"] = pending["ships"]
+        st.session_state["active_ship_idx"] = 0 if pending["ships"] else None
+        for k in ("trajectory_result", "radar_result",
+                  "passive_result", "encounter_summary"):
+            st.session_state[k] = None
+        st.session_state["last_clicked"] = None
+        _clear_sim()
+        st.success(f"Imported {len(pending['ships'])} ship(s) from file.")
+
     location_style = st.selectbox(
         "Location", region_keys,
         format_func=lambda k: region_labels[k],
         help="Pick which port area to simulate.",
+        key="location",
     )
     region = load_region(location_style)
 
@@ -195,6 +285,28 @@ with st.sidebar:
             st.session_state["passive_result"] = None
             _clear_sim()
             st.rerun()
+
+    uploaded = st.file_uploader(
+        "Import scenario (.json)", type=["json"],
+        help="Import a file saved with 'Save scenario as JSON' (or the full "
+             "results download) to restore its ships, waypoints and timings.",
+    )
+    if uploaded is not None:
+        # file_id changes on every upload, so re-uploading the same file
+        # resets any edits made since - but plain reruns don't reload it.
+        file_token = getattr(uploaded, "file_id", None) or (uploaded.name, uploaded.size)
+        if file_token != st.session_state.get("loaded_file_token"):
+            try:
+                parsed = _parse_scenario_json(
+                    json.loads(uploaded.getvalue().decode("utf-8")))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                st.error("That file isn't valid JSON.")
+            except ValueError as e:
+                st.error(f"Couldn't import scenario: {e}.")
+            else:
+                st.session_state["loaded_file_token"] = file_token
+                st.session_state["pending_load"] = parsed
+                st.rerun()
 
     # -----------------------------------------------------------------------
     # Step 3 - Ships
@@ -300,24 +412,21 @@ with st.sidebar:
         value=f"{region.display_name} - {encounter_labels[encounter_type]}",
     )
 
-    duration_presets = {
-        "15 minutes": 900.0,
-        "30 minutes": 1800.0,
-        "1 hour": 3600.0,
-        "2 hours": 7200.0,
-        "Custom (seconds)": None,
-    }
+    # Keyed (defaults set via session state) so a loaded file can set them.
+    st.session_state.setdefault("duration_choice", "1 hour")
+    st.session_state.setdefault("custom_duration", 3600.0)
     duration_choice = st.selectbox(
         "How long should the scenario run for?",
-        list(duration_presets.keys()),
-        index=2,
+        list(_DURATION_PRESETS.keys()),
+        key="duration_choice",
     )
-    if duration_presets[duration_choice] is None:
+    if _DURATION_PRESETS[duration_choice] is None:
         scenario_duration_s = st.number_input(
-            "Custom duration (seconds)", 60.0, 36000.0, 3600.0, 60.0,
+            "Custom duration (seconds)", min_value=60.0, max_value=36000.0,
+            step=60.0, key="custom_duration",
         )
     else:
-        scenario_duration_s = duration_presets[duration_choice]
+        scenario_duration_s = _DURATION_PRESETS[duration_choice]
 
     scenario = _ui_to_scenario(scenario_name, location_style, encounter_type,
                                scenario_duration_s)
