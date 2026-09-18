@@ -860,29 +860,21 @@ def _build_animation(result: dict, region: Region,
         steps=slider_steps,
     )
 
-    # Backward playback: build frame names in reverse.
-    reverse_frames = [f"f{i}" for i in range(len(frames) - 1, -1, -1)]
-
     fig.update_layout(
-        height=560,
+        height=590,
         map=dict(style=map_style,
                  center=dict(lat=region.center[0], lon=region.center[1]),
                  zoom=region.default_zoom - 1),
         sliders=[scrubber],
         updatemenus=[dict(
             type="buttons", showactive=True, direction="left",
-            x=0.1, xanchor="right", y=1.08, yanchor="top",
+            x=0.1, xanchor="right", y=1.16, yanchor="top",
             bgcolor="rgba(255,255,255,0.15)", bordercolor="#DDD", borderwidth=1,
             pad={"r": 10, "t": 10, "b": 10},
             buttons=[
                 dict(label="Play", method="animate",
                      args=[None, {"frame": {"duration": speed_ms, "redraw": True},
                                   "fromcurrent": True, "mode": "immediate"}]),
-                dict(label="Play reverse", method="animate",
-                     args=[reverse_frames,
-                           {"frame": {"duration": speed_ms, "redraw": True},
-                            "mode": "immediate",
-                            "transition": {"duration": 0}}]),
                 dict(label="Pause", method="animate",
                      args=[[None], {"frame": {"duration": 0, "redraw": False},
                                     "mode": "immediate",
@@ -894,7 +886,7 @@ def _build_animation(result: dict, region: Region,
             ],
         )],
         legend=dict(font=dict(size=11)),
-        margin={"r": 0, "t": 60, "l": 0, "b": 40},
+        margin={"r": 0, "t": 90, "l": 0, "b": 40},
     )
     return fig
 
