@@ -557,6 +557,8 @@ st.markdown("""<style>
              padding-bottom:.5rem;margin-bottom:1rem;}
 .small-font{font-size:16px !important;}
 .stButton>button{border-radius:10px;}
+/* hide the uploader's "200MB per file" size hint */
+[data-testid="stFileUploaderDropzoneInstructions"]{display:none;}
 </style>""", unsafe_allow_html=True)
 
 
