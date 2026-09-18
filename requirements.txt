@@ -1,11 +1,20 @@
-streamlit>=1.35.0
-folium>=0.18.0
-streamlit-folium>=0.22.0
-plotly>=5.22.0
-shapely>=2.0.0
-geopy>=2.4.0
-numpy>=1.26.0
-scipy>=1.13.0
-requests>=2.31.0
-pyproj>=3.6.0
-pandas>=2.2.0
+# Tested with Python 3.12.8.
+# Versions are pinned to the exact releases the project was developed and
+# tested with, so a fresh install behaves the same as the final demo.
+
+# Web interface and maps
+streamlit==1.59.1
+streamlit-folium==0.27.2
+folium==0.20.0
+plotly==6.8.0
+
+# Geometry and geodesy
+shapely==2.1.2
+geopy==2.4.1
+
+# Numerics and data handling
+numpy==2.5.1
+pandas==3.0.3
+
+# Optional live wind data (off by default in the app)
+requests==2.34.2
