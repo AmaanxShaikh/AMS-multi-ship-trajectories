@@ -836,6 +836,13 @@ def _build_animation(result: dict, region: Region,
 
     fig.frames = frames
 
+    # The map shows the base traces until Play is pressed, and those start
+    # empty - so copy the first frame in, otherwise ships alive at the start
+    # are invisible on load.
+    if frames:
+        for trace_idx, trace in zip(moving_indices, frames[0].data):
+            fig.data[trace_idx].update(lon=trace.lon, lat=trace.lat, text=trace.text)
+
     # Scrubber: one step per frame, labelled by time in seconds.
     slider_steps = [
         dict(
