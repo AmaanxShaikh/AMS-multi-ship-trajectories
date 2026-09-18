@@ -745,18 +745,11 @@ def _build_animation(result: dict, region: Region,
             mode="lines", line=dict(width=1, color=ship["color"]),
             fill="toself", fillcolor=ship["color"], opacity=0.9,
             name=f"{ship['ship_id']} hull"))
-        # Ship label - text pinned next to the hull
-        fig.add_trace(go.Scattermap(
-            lon=[], lat=[],
-            mode="markers+text",
-            marker=dict(size=1, color=ship["color"]),
-            text=[ship["ship_id"]], textposition="top right",
-            textfont=dict(size=10, color=ship["color"]),
-            name=f"{ship['ship_id']} label"))
-        # trail, hull, label are the per-frame moving traces (ghost is not)
-        moving_indices += [base_idx + 4 * k + 1,
-                           base_idx + 4 * k + 2,
-                           base_idx + 4 * k + 3]
+        # No on-map name labels: every animated trace is redrawn each frame,
+        # so text on the map flickers. A static colour key sits below the chart.
+        # trail and hull are the per-frame moving traces (ghost is not)
+        moving_indices += [base_idx + 3 * k + 1,
+                           base_idx + 3 * k + 2]
 
     # Animation timeline: cover the whole scenario, not just the longest traj.
     scenario_end = max(
@@ -780,7 +773,7 @@ def _build_animation(result: dict, region: Region,
     fi = 0
     frame_times: list[float] = []
     while t <= timeline_end + 1e-6:
-        # Each frame only carries the moving traces (trail, hull, label per
+        # Each frame only carries the moving traces (trail and hull per
         # ship); the map tiles, LOS, and path ghosts stay untouched between
         # frames, which removes most of the redraw cost and flicker.
         fd = []
@@ -793,13 +786,11 @@ def _build_animation(result: dict, region: Region,
                 # Ship has not entered the scene yet - hide it.
                 fd.append(go.Scattermap(lon=[], lat=[], mode="lines"))
                 fd.append(go.Scattermap(lon=[], lat=[], mode="lines"))
-                fd.append(go.Scattermap(lon=[], lat=[], mode="markers"))
                 continue
 
             idx   = min(int(round(local_t)), len(traj) - 1)
             trail = traj[max(0, idx - 40): idx + 1]
             cur   = traj[idx]
-            label = f"{ship['ship_id']} t={t:.0f}s {cur['heading']:.0f}°"
 
             # Animated trail - solid ship color
             fd.append(go.Scattermap(
@@ -820,14 +811,6 @@ def _build_animation(result: dict, region: Region,
                 mode="lines", line=dict(width=1, color=ship["color"]),
                 fill="toself", fillcolor=ship["color"], opacity=0.9))
 
-            # Label next to the hull
-            fd.append(go.Scattermap(
-                lon=[cur["lon"]], lat=[cur["lat"]],
-                mode="markers+text",
-                marker=dict(size=1, color=ship["color"]),
-                text=[label], textposition="top right",
-                textfont=dict(size=9, color=ship["color"])))
-
         frames.append(go.Frame(data=fd, name=f"f{fi}",
                                traces=moving_indices))
         frame_times.append(t)
@@ -841,7 +824,7 @@ def _build_animation(result: dict, region: Region,
     # are invisible on load.
     if frames:
         for trace_idx, trace in zip(moving_indices, frames[0].data):
-            fig.data[trace_idx].update(lon=trace.lon, lat=trace.lat, text=trace.text)
+            fig.data[trace_idx].update(lon=trace.lon, lat=trace.lat)
 
     # Scrubber: one step per frame, labelled by time in seconds.
     slider_steps = [
@@ -898,7 +881,8 @@ def _build_animation(result: dict, region: Region,
                                     "transition": {"duration": 0}}]),
             ],
         )],
-        legend=dict(font=dict(size=11)),
+        # Ships are identified by the colour key shown below the chart.
+        showlegend=False,
         margin={"r": 0, "t": 90, "l": 0, "b": 40},
     )
     return fig
@@ -1087,6 +1071,17 @@ if st.session_state.get("trajectory_result"):
         window_end_s=window[1],
     )
     st.plotly_chart(fig_anim, use_container_width=True)
+    # Static colour key (outside the animation, so it doesn't flicker).
+    key_items = [
+        f"<span style='white-space:nowrap;margin-right:18px'>"
+        f"<span style='display:inline-block;width:14px;height:8px;"
+        f"background:{s['color']};border-radius:2px;margin-right:6px'></span>"
+        f"{s['ship_id']}</span>"
+        for s in result.get("ships", [])
+        if s["ship_id"] in visible_ids and s.get("trajectory")
+    ]
+    if key_items:
+        st.markdown(" ".join(key_items), unsafe_allow_html=True)
     st.caption(
         "Play animates ships on the shared simulation clock. Use the "
         "filters above to focus on specific ships or a time slice."
