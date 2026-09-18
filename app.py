@@ -869,7 +869,13 @@ def _build_animation(result: dict, region: Region,
 
     fig.update_layout(
         height=590,
+        autosize=False,
+        # Keep the user's pan/zoom across animation frames; without this every
+        # redraw snaps the map back to the default view, which looks like the
+        # chart resizing.
+        uirevision="scenario-animation",
         map=dict(style=map_style,
+                 uirevision="scenario-animation",
                  center=dict(lat=region.center[0], lon=region.center[1]),
                  zoom=region.default_zoom - 1),
         sliders=[scrubber],
